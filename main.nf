@@ -174,7 +174,7 @@ process get_software_versions {
  */
 process fastqc {
     tag "$name"
-    label 'process_medium'
+    label 'process_low'
     publishDir "${params.outdir}/fastqc", mode: params.publish_dir_mode,
         saveAs: { filename ->
                       filename.indexOf('.zip') > 0 ? "zips/$filename" : "$filename"
