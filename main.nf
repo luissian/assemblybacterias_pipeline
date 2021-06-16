@@ -32,6 +32,9 @@ if (params.validate_params) {
 /* --     Collect configuration parameters     -- */
 ////////////////////////////////////////////////////
 
+// SampleSheet input
+if (params.input) { ch_input = file(params.input, checkIfExists: true) } else { exit 1, "Input samplesheet file not specified!" }
+
 // Check if genome exists in the config file
 if (params.genomes && params.genome && !params.genomes.containsKey(params.genome)) {
     exit 1, "The provided genome '${params.genome}' is not available in the iGenomes file. Currently the available genomes are ${params.genomes.keySet().join(', ')}"
@@ -68,26 +71,31 @@ ch_output_docs_images = file("$projectDir/docs/images/", checkIfExists: true)
 /*
  * Create a channel for input read files
  */
+/*
 if (params.input_paths) {
     if (params.single_end) {
         Channel
             .from(params.input_paths)
             .map { row -> [ row[0], [ file(row[1][0], checkIfExists: true) ] ] }
             .ifEmpty { exit 1, 'params.input_paths was empty - no input files supplied' }
-            .into { ch_read_files_fastqc; ch_read_files_trimming }
+            .into { ch_read_files_fastp; ch_read_files_fastqc;  ch_read_files_trimming }
     } else {
         Channel
             .from(params.input_paths)
             .map { row -> [ row[0], [ file(row[1][0], checkIfExists: true), file(row[1][1], checkIfExists: true) ] ] }
             .ifEmpty { exit 1, 'params.input_paths was empty - no input files supplied' }
-            .into { ch_read_files_fastqc; ch_read_files_trimming }
+            .into { ch_read_files_fastp; ch_read_files_fastqc;  ch_read_files_trimming }
     }
 } else {
     Channel
         .fromFilePairs(params.input, size: params.single_end ? 1 : 2)
         .ifEmpty { exit 1, "Cannot find any reads matching: ${params.input}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --single_end on the command line." }
-        .into { ch_read_files_fastqc; ch_read_files_trimming }
+        .into { ch_read_files_fastp; ch_read_files_fastqc; ch_read_files_trimming }
 }
+*/
+
+
+
 
 ////////////////////////////////////////////////////
 /* --         PRINT PARAMETER SUMMARY          -- */
@@ -101,7 +109,8 @@ summary['Run Name']         = workflow.runName
 // TODO nf-core: Report custom parameters here
 summary['Input']            = params.input
 summary['Fasta Ref']        = params.fasta
-summary['Data Type']        = params.single_end ? 'Single-End' : 'Paired-End'
+if (params.gff)                        summary['GFF'] = params.gff
+//summary['Data Type']        = params.single_end ? 'Single-End' : 'Paired-End'
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
 if (workflow.containerEngine) summary['Container'] = "$workflow.containerEngine - $workflow.container"
 summary['Output dir']       = params.outdir
@@ -170,8 +179,304 @@ process get_software_versions {
 }
 
 /*
+ * PREPROCESSING: Uncompress genome fasta file
+ */
+if (params.fasta.endsWith('.gz')) {
+    process GUNZIP_FASTA {
+        label 'error_retry'
+        if (params.save_reference) {
+            publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+        }
+
+        input:
+        path fasta from params.fasta
+
+        output:
+        path "$unzip" into ch_fasta
+
+        script:
+        unzip = fasta.toString() - '.gz'
+        """
+        pigz -f -d -p $task.cpus $fasta
+        """
+    }
+} else {
+    ch_fasta = file(params.fasta)
+}
+
+/*
+ * PREPROCESSING: Uncompress gff annotation file
+ */
+if (params.gff) {
+    file(params.gff, checkIfExists: true)
+    if (params.gff.endsWith('.gz')) {
+        process GUNZIP_GFF {
+            label 'error_retry'
+            if (params.save_reference) {
+                publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+            }
+
+            input:
+            path gff from params.gff
+
+            output:
+            path "$unzip" into ch_gff
+
+            script:
+            unzip = gff.toString() - '.gz'
+            """
+            pigz -f -d -p $task.cpus $gff
+            """
+        }
+    } else {
+        ch_gff = file(params.gff)
+    }
+} else {
+    //See: https://nextflow-io.github.io/patterns/index.html#_optional_input
+    ch_gff = file('NO_FILE')
+}
+
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+/* --                                                                     -- */
+/* --                     PARSE DESIGN FILE                               -- */
+/* --                                                                     -- */
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * PREPROCESSING: Reformat samplesheet and check validity
+ */
+process CHECK_SAMPLESHEET {
+    tag "$samplesheet"
+    publishDir "${params.outdir}/", mode: params.publish_dir_mode,
+        saveAs: { filename ->
+                      if (filename.endsWith(".tsv")) "preprocess/sra/$filename"
+                      else "pipeline_info/$filename"
+                }
+
+    input:
+    path samplesheet from ch_input
+
+    output:
+    path "samplesheet.valid.csv" into ch_samplesheet_reformat
+    path "sra_run_info.tsv" optional true
+
+    script:  // These scripts are bundled with the pipeline, in nf-core/viralrecon/bin/
+    run_sra = !params.skip_sra && !isOffline()
+    """
+    awk -F, '{if(\$1 != "" && \$2 != "") {print \$0}}' $samplesheet > nonsra_id.csv
+    check_samplesheet.py nonsra_id.csv nonsra.samplesheet.csv
+    awk -F, '{if(\$1 != "" && \$2 == "" && \$3 == "") {print \$1}}' $samplesheet > sra_id.list
+    if $run_sra && [ -s sra_id.list ]
+    then
+        fetch_sra_runinfo.py sra_id.list sra_run_info.tsv --platform ILLUMINA --library_layout SINGLE,PAIRED
+        sra_runinfo_to_samplesheet.py sra_run_info.tsv sra.samplesheet.csv
+    fi
+    if [ -f nonsra.samplesheet.csv ]
+    then
+        head -n 1 nonsra.samplesheet.csv > samplesheet.valid.csv
+    else
+        head -n 1 sra.samplesheet.csv > samplesheet.valid.csv
+    fi
+    tail -n +2 -q *sra.samplesheet.csv >> samplesheet.valid.csv
+    """
+}
+
+// Function to get list of [ sample, single_end?, is_sra?, is_ftp?, [ fastq_1, fastq_2 ], [ md5_1, md5_2] ]
+def validate_input(LinkedHashMap sample) {
+    def sample_id = sample.sample_id
+    def single_end = sample.single_end.toBoolean()
+    def is_sra = sample.is_sra.toBoolean()
+    def is_ftp = sample.is_ftp.toBoolean()
+    def fastq_1 = sample.fastq_1
+    def fastq_2 = sample.fastq_2
+    def md5_1 = sample.md5_1
+    def md5_2 = sample.md5_2
+
+    def array = []
+    if (!is_sra) {
+        if (single_end) {
+            array = [ sample_id, single_end, is_sra, is_ftp, [ file(fastq_1, checkIfExists: true) ] ]
+        } else {
+            array = [ sample_id, single_end, is_sra, is_ftp, [ file(fastq_1, checkIfExists: true), file(fastq_2, checkIfExists: true) ] ]
+        }
+    } else {
+        array = [ sample_id, single_end, is_sra, is_ftp, [ fastq_1, fastq_2 ], [ md5_1, md5_2 ] ]
+    }
+
+    return array
+}
+
+/*
+ * Create channels for input fastq files
+ */
+ch_samplesheet_reformat
+    .splitCsv(header:true, sep:',')
+    .map { validate_input(it) }
+    .into { ch_reads_all
+            ch_reads_sra }
+
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+/* --                                                                     -- */
+/* --                     DOWNLOAD SRA FILES                              -- */
+/* --                                                                     -- */
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * STEP 1: Download and check SRA data
+ */
+if (!params.skip_sra || !isOffline()) {
+    ch_reads_sra
+        .filter { it[2] }
+        .into { ch_reads_sra_ftp
+                ch_reads_sra_dump }
+
+    process SRA_FASTQ_FTP {
+        tag "$sample"
+        label 'process_medium'
+        label 'error_retry'
+        publishDir "${params.outdir}/preprocess/sra", mode: params.publish_dir_mode,
+            saveAs: { filename ->
+                          if (filename.endsWith(".md5")) "md5/$filename"
+                          else params.save_sra_fastq ? filename : null
+                    }
+
+        when:
+        is_ftp
+
+        input:
+        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), val(fastq), val(md5) from ch_reads_sra_ftp
+
+        output:
+        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_ftp
+        path "*.md5"
+
+        script:
+        if (single_end) {
+            """
+            curl -L ${fastq[0]} -o ${sample}.fastq.gz
+            echo "${md5[0]}  ${sample}.fastq.gz" > ${sample}.fastq.gz.md5
+            md5sum -c ${sample}.fastq.gz.md5
+            """
+        } else {
+            """
+            curl -L ${fastq[0]} -o ${sample}_1.fastq.gz
+            echo "${md5[0]}  ${sample}_1.fastq.gz" > ${sample}_1.fastq.gz.md5
+            md5sum -c ${sample}_1.fastq.gz.md5
+            curl -L ${fastq[1]} -o ${sample}_2.fastq.gz
+            echo "${md5[1]}  ${sample}_2.fastq.gz" > ${sample}_2.fastq.gz.md5
+            md5sum -c ${sample}_2.fastq.gz.md5
+            """
+        }
+    }
+
+    process SRA_FASTQ_DUMP {
+        tag "$sample"
+        label 'process_medium'
+        label 'error_retry'
+        publishDir "${params.outdir}/preprocess/sra", mode: params.publish_dir_mode,
+            saveAs: { filename ->
+                          if (filename.endsWith(".log")) "log/$filename"
+                          else params.save_sra_fastq ? filename : null
+                    }
+
+        when:
+        !is_ftp
+
+        input:
+        tuple val(sample), val(single_end), val(is_sra), val(is_ftp) from ch_reads_sra_dump.map { it[0..3] }
+
+        output:
+        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_dump
+        path "*.log"
+
+        script:
+        prefix = "${sample.split('_')[0..-2].join('_')}"
+        pe = single_end ? "" : "--readids --split-e"
+        rm_orphan = single_end ? "" : "[ -f  ${prefix}.fastq.gz ] && rm ${prefix}.fastq.gz"
+        """
+        parallel-fastq-dump \\
+            --sra-id $prefix \\
+            --threads $task.cpus \\
+            --outdir ./ \\
+            --tmpdir ./ \\
+            --gzip \\
+            $pe \\
+            > ${prefix}.fastq_dump.log
+        $rm_orphan
+        """
+    }
+
+    ch_reads_all
+        .filter { !it[2] }
+        .concat(ch_sra_fastq_ftp, ch_sra_fastq_dump)
+        .set { ch_reads_all }
+}
+
+ch_reads_all
+    .map { [ it[0].split('_')[0..-2].join('_'), it[1], it[4] ] }
+    .groupTuple(by: [0, 1])
+    .map { [ it[0], it[1], it[2].flatten() ] }
+    .set { ch_reads_all }
+
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+/* --                                                                     -- */
+/* --                     MERGE RESEQUENCED FASTQ                         -- */
+/* --                                                                     -- */
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * STEP 2: Merge FastQ files with the same sample identifier
+ */
+process CAT_FASTQ {
+    tag "$sample"
+
+    input:
+    tuple val(sample), val(single_end), path(reads) from ch_reads_all
+
+    output:
+    tuple val(sample), val(single_end), path("*.merged.fastq.gz") into ch_cat_fastqc,
+                                                                       ch_cat_fastp
+
+    script:
+    readList = reads.collect{it.toString()}
+    if (!single_end) {
+        if (readList.size > 2) {
+            def read1 = []
+            def read2 = []
+            readList.eachWithIndex{ v, ix -> ( ix & 1 ? read2 : read1 ) << v }
+            """
+            cat ${read1.sort().join(' ')} > ${sample}_1.merged.fastq.gz
+            cat ${read2.sort().join(' ')} > ${sample}_2.merged.fastq.gz
+            """
+        } else {
+            """
+            ln -s ${reads[0]} ${sample}_1.merged.fastq.gz
+            ln -s ${reads[1]} ${sample}_2.merged.fastq.gz
+            """
+        }
+    } else {
+        if (readList.size > 1) {
+            """
+            cat ${readList.sort().join(' ')} > ${sample}.merged.fastq.gz
+            """
+        } else {
+            """
+            ln -s $reads ${sample}.merged.fastq.gz
+            """
+        }
+    }
+}
+
+/*
  * STEP 1 - FastQC
  */
+
 process fastqc {
     tag "$name"
     label 'process_low'
@@ -181,7 +486,7 @@ process fastqc {
         }
 
     input:
-    set val(name), file(reads) from ch_read_files_fastqc
+    tuple val(name), val(single_end), path(reads) from ch_cat_fastqc
 
     output:
     file '*_fastqc.{zip,html}' into ch_fastqc_results
@@ -192,9 +497,73 @@ process fastqc {
     """
 }
 
+
+/*
+ * STEP 4: Fastp adapter trimming and quality filtering
+ */
+
+process FASTP {
+        tag "$sample"
+        label 'process_medium'
+        publishDir "${params.outdir}/preprocess/fastp", mode: params.publish_dir_mode,
+            saveAs: { filename ->
+                        if (filename.endsWith(".json")) filename
+                        else if (filename.endsWith(".fastp.html")) filename
+                        else if (filename.endsWith("_fastqc.html")) "fastqc/$filename"
+                        else if (filename.endsWith(".zip")) "fastqc/zips/$filename"
+                        else if (filename.endsWith(".log")) "log/$filename"
+                        else params.save_trimmed ? filename : null
+                    }
+        input:
+        tuple val(sample), val(single_end), path(reads) from ch_cat_fastp
+
+        output:
+        set val(sample), val(single_end), path("*.trim.fastq.gz") into ch_fastp_bowtie2,
+                                                                         ch_fastp_cutadapt,
+                                                                         ch_fastp_kraken2
+        path "*.json" into ch_fastp_mqc
+        path "*_fastqc.{zip,html}" into ch_fastp_fastqc_mqc
+        path "*.{log,fastp.html}"
+        path "*.fail.fastq.gz"
+
+        script:
+        // Added soft-links to original fastqs for consistent naming in MultiQC
+        autodetect = single_end ? "" : "--detect_adapter_for_pe"
+        """
+        IN_READS='--in1 ${sample}.fastq.gz'
+        OUT_READS='--out1 ${sample}.trim.fastq.gz --failed_out ${sample}.fail.fastq.gz'
+        if $single_end; then
+            [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
+        else
+            [ ! -f  ${sample}_1.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.fastq.gz
+            [ ! -f  ${sample}_2.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.fastq.gz
+            IN_READS='--in1 ${sample}_1.fastq.gz --in2 ${sample}_2.fastq.gz'
+            OUT_READS='--out1 ${sample}_1.trim.fastq.gz --out2 ${sample}_2.trim.fastq.gz --unpaired1 ${sample}_1.fail.fastq.gz --unpaired2 ${sample}_2.fail.fastq.gz'
+        fi
+
+        fastp \\
+            \$IN_READS \\
+            \$OUT_READS \\
+            $autodetect \\
+            --cut_front \\
+            --cut_tail \\
+            --cut_mean_quality $params.cut_mean_quality \\
+            --qualified_quality_phred $params.qualified_quality_phred \\
+            --unqualified_percent_limit $params.unqualified_percent_limit \\
+            --length_required $params.min_trim_length \\
+            --trim_poly_x \\
+            --thread $task.cpus \\
+            --json ${sample}.fastp.json \\
+            --html ${sample}.fastp.html \\
+            2> ${sample}.fastp.log
+
+        """
+}
+
 /*
  * STEP 2 - MultiQC
  */
+
 process multiqc {
     publishDir "${params.outdir}/MultiQC", mode: params.publish_dir_mode
 
@@ -386,5 +755,15 @@ def checkHostname() {
                 }
             }
         }
+    }
+}
+
+// Function to check if running offline
+def isOffline() {
+    try {
+        return NXF_OFFLINE as Boolean
+    }
+    catch( Exception e ) {
+        return false
     }
 }

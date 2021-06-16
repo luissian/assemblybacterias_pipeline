@@ -1,6 +1,6 @@
 # You can use this file to create a conda environment for this pipeline:
 #   conda env create -f environment.yml
-name: nf-core-assemblybacterias-1.0dev
+name: nf-assembacterias-0.0.1
 channels:
   - conda-forge
   - bioconda
@@ -9,10 +9,16 @@ dependencies:
   - conda-forge::python=3.7.3
   - conda-forge::markdown=3.1.1
   - conda-forge::pymdown-extensions=6.0
-  - conda-forge::pygments=2.5.2
+  - conda-forge::pygments=2.9.0
   # TODO nf-core: Add required software dependencies here
-  - bioconda::fastqc=0.11.9
+  - bioconda::fastqc=0.11.8
   - bioconda::multiqc=1.10.1
+  - bioconda::fastp=0.20.1
   - bioconda::quast=5.0.2
-  - bioconda::fastp:0.20.1
+  #- pip
+  #- pip:
+source:
+   url: https://bitbucket.org/genomicepidemiology/kmerfinder.git
   
+prefix: /home/bioinfo/anaconda3/envs/assembacterias_nextflow
+#conda env create --prefix /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/work/conda/nf-core-assemblybacterias-dbadda8e82f9cf8866b8b6473e78057d --file /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/environment.yml
