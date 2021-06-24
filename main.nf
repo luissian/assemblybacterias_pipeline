@@ -16,7 +16,7 @@ log.info Headers.nf_core(workflow, params.monochrome_logs)
 ////////////////////////////////////////////////////+
 def json_schema = "$projectDir/nextflow_schema.json"
 if (params.help) {
-    def command = "nextflow run nf-core/assemblybacterias --input '*_R{1,2}.fastq.gz' -profile docker"
+    def command = "nextflow run nf-core/assemblybacterias --input 'samplesheet.csv' -profile docker --fasta GRCh39.fna.gz"
     log.info NfcoreSchema.params_help(workflow, params, json_schema, command)
     exit 0
 }
@@ -27,6 +27,11 @@ if (params.help) {
 if (params.validate_params) {
     NfcoreSchema.validateParameters(params, json_schema, log)
 }
+
+//if (params.bacteria_database) { ch_kmerfinder_db = file(params.bacteria_database, checkIfExists: true)} else { exit 1, "kmerfinder Database file not specified!" }
+ch_kmerfinder_db = Channel.fromPath(params.bacteria_database, type:'dir')
+
+if (params.bacteria_taxonomy) { ch_kmerfinder_taxonomy = file(params.bacteria_taxonomy, checkIfExists: true) } else { exit 1, "Kmerfinder taxonmy file does not exist" }
 
 ////////////////////////////////////////////////////
 /* --     Collect configuration parameters     -- */
@@ -174,6 +179,7 @@ process get_software_versions {
     echo $workflow.nextflow.version > v_nextflow.txt
     fastqc --version > v_fastqc.txt
     multiqc --version > v_multiqc.txt
+    fastp --version > v_fastp.txt
     scrape_software_versions.py &> software_versions_mqc.yaml
     """
 }
@@ -504,7 +510,7 @@ process fastqc {
 
 process FASTP {
         tag "$sample"
-        label 'process_medium'
+        label 'process_low'
         publishDir "${params.outdir}/preprocess/fastp", mode: params.publish_dir_mode,
             saveAs: { filename ->
                         if (filename.endsWith(".json")) filename
@@ -518,11 +524,9 @@ process FASTP {
         tuple val(sample), val(single_end), path(reads) from ch_cat_fastp
 
         output:
-        set val(sample), val(single_end), path("*.trim.fastq.gz") into ch_fastp_bowtie2,
-                                                                         ch_fastp_cutadapt,
-                                                                         ch_fastp_kraken2
+        set val(sample), val(single_end), path("*.trim.fastq.gz") into ch_fastp_kmerfider
         path "*.json" into ch_fastp_mqc
-        path "*_fastqc.{zip,html}" into ch_fastp_fastqc_mqc
+        // path "*_fastqc.{zip,html}" into ch_fastp_fastqc_mqc
         path "*.{log,fastp.html}"
         path "*.fail.fastq.gz"
 
@@ -593,6 +597,43 @@ process multiqc {
     multiqc -f $rtitle $rfilename $custom_config_file .
     """
 }
+
+/*
+ * STEP 2 - MultiQC
+ */
+
+process kmerfinder {
+    tag "$sample"
+    label 'process_low'
+
+    publishDir "${params.outdir}/kmerfinder/${sample}", mode: params.publish_dir_mode
+
+
+    input:
+    tuple val(sample), val(single_end), path(reads) from ch_fastp_kmerfider
+    path kmerfinderDB from ch_kmerfinder_db
+    path kmerfinderTAX from ch_kmerfinder_taxonomy
+
+    output:
+    file "*.txt"
+
+    script:
+    """
+
+    IN_READS='-i ${sample}.trim.fastq.gz'
+    if $single_end; then
+        [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
+    else
+        [ ! -f  ${sample}_1.trim.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.trim.fastq.gz
+        [ ! -f  ${sample}_2.trim.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.trim.fastq.gz
+        IN_READS='-i ${sample}_1.trim.fastq.gz  ${sample}_2.trim.fastq.gz'
+    fi
+
+    kmerfinder.py \\
+    \$IN_READS -o ${sample} -db  $kmerfinderDB/bacteria.ATG -tax $kmerfinderTAX  -x
+    """
+}
+
 
 /*
  * STEP 3 - Output Description HTML
