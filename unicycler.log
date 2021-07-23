@@ -1,0 +1,209 @@
+Error: could not find /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/readsR1
+
+
+
+
+
+
+
+
+
+
+
+
+
+Starting Unicycler (2021-07-11 14:31:13)
+----------------------------------------
+    Welcome to Unicycler, an assembly pipeline for bacterial genomes. Since you provided only short reads, Unicycler will essentially function as a SPAdes-optimiser. It will try many k-mer sizes, choose the best based on contig length and graph connectivity, and scaffold the graph using SPAdes repeat resolution.
+    For more information, please see https://github.com/rrwick/Unicycler
+
+Command: /home/bioinfo/anaconda3/envs/nf-assembacterias-0.0.1/bin/unicycler --threads 2 -1 work/53/22cf1e15793e32b56887a78714c96e/S20191750_1.fastq.gz -2 work/53/22cf1e15793e32b56887a78714c96e/S20191750_2.fastq.gz --pilon_path pilon -o .
+
+Unicycler version: v0.4.8
+Using 2 threads
+
+The output directory already exists and files may be reused or overwritten:
+  /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias
+
+Dependencies:
+  Program         Version             Status  
+  spades.py       3.13.0              good    
+  racon                               not used
+  makeblastdb     2.5.0+              good    
+  tblastn         2.5.0+              good    
+  bowtie2-build   2.4.4               good    
+  bowtie2         2.4.4               good    
+  samtools        1.7                 good    
+  java            1.8.0_152-release   good    
+  pilon           1.24                good    
+  bcftools                            not used
+
+
+SPAdes read error correction (2021-07-11 14:31:53)
+--------------------------------------------------
+    Unicycler uses the SPAdes read error correction module to reduce the number of errors in the short read before SPAdes assembly. This can make the assembly faster and simplify the assembly graph structure.
+
+Command: /home/bioinfo/anaconda3/envs/nf-assembacterias-0.0.1/bin/spades.py -1 /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/work/53/22cf1e15793e32b56887a78714c96e/S20191750_1.fastq.gz -2 /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/work/53/22cf1e15793e32b56887a78714c96e/S20191750_2.fastq.gz -o /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/spades_assembly/read_correction --threads 2 --only-error-correction
+
+Corrected reads:
+  /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/spades_assembly/corrected_1.fastq.gz
+  /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/spades_assembly/corrected_2.fastq.gz
+
+
+Choosing k-mer range for assembly (2021-07-11 15:50:56)
+-------------------------------------------------------
+    Unicycler chooses a k-mer range for SPAdes based on the length of the input reads. It uses a wide range of many k-mer sizes to maximise the chance of finding an ideal assembly.
+
+SPAdes maximum k-mer: 127
+Median read length: 151
+K-mer range: 27, 47, 63, 77, 89, 99, 107, 115, 121, 127
+
+
+SPAdes assemblies (2021-07-11 15:51:35)
+---------------------------------------
+    Unicycler now uses SPAdes to assemble the short reads. It scores the assembly graph for each k-mer using the number of contigs (fewer is better) and the number of dead ends (fewer is better). The score function is 1/(c*(d+2)), where c is the contig count and d is the dead end count.
+
+K-mer   Contigs   Dead ends   Score      
+   27                         too complex
+   47       465           0      1.08e-03
+   63       408           0      1.23e-03
+   77       349           0      1.43e-03
+   89       261           0      1.92e-03
+   99       228           0      2.19e-03
+  107       207           0      2.42e-03
+  115       192           0      2.60e-03
+  121       183           0      2.73e-03 <-best
+  127       173           1      1.93e-03
+
+Read depth filter: removed 2 contigs totalling 475 bp
+Deleting /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/spades_assembly/
+
+
+Determining graph multiplicity (2021-07-11 16:29:54)
+----------------------------------------------------
+    Multiplicity is the number of times a sequence occurs in the underlying sequence. Single-copy contigs (those with a multiplicity of one, occurring only once in the underlying sequence) are particularly useful.
+
+Saving /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/001_best_spades_graph.gfa
+
+
+Cleaning graph (2021-07-11 16:29:54)
+------------------------------------
+    Unicycler now performs various cleaning procedures on the graph to remove overlaps and simplify the graph structure. The end result is a graph ready for bridging.
+
+Graph overlaps removed
+
+Removed zero-length segments:
+    105, 106, 108, 110, 113, 114, 115, 116, 117, 119, 120, 128, 129, 130, 131, 132, 134, 136, 140, 144, 155, 159, 165, 167, 178
+
+Removed zero-length segments:
+    175
+
+Merged small segments:
+    171, 174, 177, 179, 180, 181
+
+Saving /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/002_overlaps_removed.gfa
+
+    Unicycler now selects a set of anchor contigs from the single-copy contigs. These are the contigs which will be connected via bridges to form the final assembly.
+
+47 anchor segments (4,868,162 bp) out of 153 total segments (4,919,808 bp)
+
+
+Creating SPAdes contig bridges (2021-07-11 16:29:55)
+----------------------------------------------------
+    SPAdes uses paired-end information to perform repeat resolution (RR) and produce contigs from the assembly graph. SPAdes saves the graph paths corresponding to these contigs in the contigs.paths file. When one of these paths contains two or more anchor contigs, Unicycler can create a bridge from the path.
+
+                                                    Bridge
+Start                 Path                 End     quality
+  -33           -87 -> 53 -> -87           41         10.5
+  -19          -109 -> 66 -> -92           46         23.6
+  -17                 -77                  44         50.1
+   -2             -121 -> -115             34         63.2
+    1                  88                  5          63.2
+    5                 -107                 8          63.2
+    8                  91                  -14        63.2
+    9                 115                  4          63.2
+   15                 -88                  35         63.2
+   16           81 -> -86 -> 79            31         26.4
+   17                 108                  30         62.9
+   21   -100 -> 72 -> 102 -> -52 -> -101   3          14.4
+   22                 107                  -36        63.2
+   23         -121 -> -140 -> 108          12         63.2
+   28                 -91                  29         63.1
+   33                 -101                 13         63.0
+   42           92 -> -55 -> 109           -46        18.0
+   44                 -77                  14         50.5
+
+
+Creating loop unrolling bridges (2021-07-11 16:29:55)
+-----------------------------------------------------
+    When a SPAdes contig path connects an anchor contig with the middle contig of a simple loop, Unicycler concludes that the sequences are contiguous (i.e. the loop is not a separate piece of DNA). It then uses the read depth of the middle and repeat contigs to guess the number of times to traverse the loop and makes a bridge.
+
+                                  Loop count   Loop count    Loop    Bridge
+Start   Repeat   Middle     End    by repeat    by middle   count   quality
+  -33      -87       53      41         0.91         0.83       1      40.6
+  -17      -77       44      14         0.93         0.90       1      42.5
+    2      105      103      28         0.77         0.74       1      38.9
+
+
+Applying bridges (2021-07-11 16:29:55)
+--------------------------------------
+    Unicycler now applies to the graph in decreasing order of quality. This ensures that when multiple, contradictory bridges exist, the most supported option is used.
+
+Bridge type   Start -> end   Path                       Quality
+SPAdes           1 -> 5      88                          63.230
+SPAdes           8 -> -14    91                          63.227
+SPAdes           5 -> 8      -107                        63.213
+SPAdes          15 -> 35     -88                         63.208
+SPAdes          23 -> 12     -121, -140, 108             63.203
+SPAdes          -2 -> 34     -121, -115                  63.189
+SPAdes          22 -> -36    107                         63.187
+SPAdes           9 -> 4      115                         63.181
+SPAdes          28 -> 29     -91                         63.139
+SPAdes          33 -> 13     -101                        63.016
+SPAdes          17 -> 30     108                         62.900
+SPAdes          44 -> 14     -77                         50.525
+SPAdes         -17 -> 44     -77                         50.061
+SPAdes          16 -> 31     81, -86, 79                 26.378
+SPAdes         -19 -> 46     -109, 66, -92               23.575
+SPAdes          42 -> -46    92, -55, 109                18.026
+SPAdes          21 -> 3      -100, 72, 102, -52, -101    14.363
+SPAdes         -33 -> 41     -87, 53, -87                10.476
+loop             2 -> 28     105, 103, 105               38.889
+
+Saving /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/003_bridges_applied.gfa
+
+
+Bridged assembly graph (2021-07-11 16:29:55)
+--------------------------------------------
+    The assembly is now mostly finished and no more structural changes will be made. Ideally the assembly graph should now have one contig per replicon and no erroneous contigs (i.e a complete assembly). If there are more contigs, then the assembly is not complete.
+
+Saving /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/004_final_clean.gfa
+
+Component   Segments   Links   Length      N50       Longest segment   Status    
+    total        109     153   4,922,669   443,675         1,195,103             
+        1         95     133   4,640,612   443,675         1,195,103   incomplete
+        2         14      20     282,057    67,392           104,425   incomplete
+
+
+Polishing assembly with Pilon (2021-07-11 16:29:55)
+---------------------------------------------------
+    Unicycler now conducts multiple rounds of Pilon in an attempt to repair any remaining small-scale errors with the assembly.
+
+Aligning reads to find appropriate insert size range...
+Insert size 1st percentile:  66
+Insert size 99th percentile: 707
+
+Pilon polish round 1
+Total number of changes: 4
+
+Pilon polish round 2
+No Pilon changes
+
+Saving /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/005_polished.gfa
+
+
+Assembly complete (2021-07-11 18:41:42)
+---------------------------------------
+Saving /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/assembly.gfa
+Saving /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/assembly.fasta
+

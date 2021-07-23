@@ -15,10 +15,17 @@ dependencies:
   - bioconda::multiqc=1.10.1
   - bioconda::fastp=0.20.1
   - bioconda::quast=5.0.2
+  - bioconda::unicycler=0.4.8
+  - bioconda::quast=5.0.2
+  - bioconda::prokka=1.14.6
+  - bioconda::pilon=1.24
+  #  SPAdes cannot be a version later than v3.13.0.
+  # This is because after that version, SPAdes stopped saving intermediate files that Unicycler needs.
+  - bioconda::spades=3.13.0
   #- pip
   #- pip:
 source:
    url: https://bitbucket.org/genomicepidemiology/kmerfinder.git
-  
+
 prefix: /home/bioinfo/anaconda3/envs/assembacterias_nextflow
 #conda env create --prefix /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/work/conda/nf-core-assemblybacterias-dbadda8e82f9cf8866b8b6473e78057d --file /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/environment.yml

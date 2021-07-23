@@ -29,10 +29,13 @@ if (params.validate_params) {
 }
 
 //if (params.bacteria_database) { ch_kmerfinder_db = file(params.bacteria_database, checkIfExists: true)} else { exit 1, "kmerfinder Database file not specified!" }
-ch_kmerfinder_db = Channel.fromPath(params.bacteria_database, type:'dir')
+//ch_kmerfinder_db = Channel.fromPath(params.bacteria_database, type:'dir')
+ch_kmerfinder_db = file(params.bacteria_database)
 
 if (params.bacteria_taxonomy) { ch_kmerfinder_taxonomy = file(params.bacteria_taxonomy, checkIfExists: true) } else { exit 1, "Kmerfinder taxonmy file does not exist" }
 
+
+if (params.reference_ncbi_bacteria) {ch_reference_ncbi_bacteria = file(params.reference_ncbi_bacteria, checkIfExists: true)} else {exit 1, "Bacteria reference file does not exist"}
 ////////////////////////////////////////////////////
 /* --     Collect configuration parameters     -- */
 ////////////////////////////////////////////////////
@@ -53,8 +56,8 @@ if (params.genomes && params.genome && !params.genomes.containsKey(params.genome
 //   input:
 //   file fasta from ch_fasta
 //
-params.fasta = params.genome ? params.genomes[ params.genome ].fasta ?: false : false
-if (params.fasta) { ch_fasta = file(params.fasta, checkIfExists: true) }
+//params.fasta = params.genome ? params.genomes[ params.genome ].fasta ?: false : false
+// if (params.fasta) { ch_fasta = file(params.fasta, checkIfExists: true) }
 
 // Check AWS batch settings
 if (workflow.profile.contains('awsbatch')) {
@@ -480,7 +483,7 @@ process CAT_FASTQ {
 }
 
 /*
- * STEP 1 - FastQC
+ * STEP 3 - FastQC
  */
 
 process fastqc {
@@ -524,9 +527,10 @@ process FASTP {
         tuple val(sample), val(single_end), path(reads) from ch_cat_fastp
 
         output:
-        set val(sample), val(single_end), path("*.trim.fastq.gz") into ch_fastp_kmerfider
+        tuple val(sample), val(single_end), path("*.trim.fastq.gz") into ch_fastp_kmerfider,
+                                                                    ch_fastp_unicycler
         path "*.json" into ch_fastp_mqc
-        // path "*_fastqc.{zip,html}" into ch_fastp_fastqc_mqc
+        //path "*_fastqc.{zip,html}" into ch_fastp_fastqc_mqc
         path "*.{log,fastp.html}"
         path "*.fail.fastq.gz"
 
@@ -564,6 +568,123 @@ process FASTP {
         """
 }
 
+
+
+/*
+ * STEP 3 - Kmerfinder
+ */
+
+process kmerfinder {
+    tag "$sample"
+    label 'process_low'
+
+    publishDir "${params.outdir}/kmerfinder/${sample}", mode: params.publish_dir_mode
+
+    input:
+    tuple val(sample), val(single_end), path(reads) from ch_fastp_kmerfider
+    file kmerfinderDB from ch_kmerfinder_db
+    file kmerfinderTAX from ch_kmerfinder_taxonomy
+
+    output:
+    //path "${sample}/*.txt" into ch_kmerfinder_results
+    path "${sample}_results.txt" into ch_kmerfinder_results
+
+    script:
+    """
+    IN_READS='-i ${sample}.trim.fastq.gz'
+    if $single_end; then
+        [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
+    else
+        [ ! -f  ${sample}_1.trim.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.trim.fastq.gz
+        [ ! -f  ${sample}_2.trim.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.trim.fastq.gz
+        IN_READS='-i ${sample}_1.trim.fastq.gz  ${sample}_2.trim.fastq.gz'
+    fi
+
+    kmerfinder.py \\
+    \$IN_READS -o ${sample} \\
+    -db  $kmerfinderDB/bacteria.ATG \\
+    -tax $kmerfinderTAX  -x
+    mv ${sample}/results.txt ${sample}_results.txt
+    """
+}
+
+
+/*
+ * STEP 4 - Download reference L
+ */
+
+process REFERENCE_DOWNLOAD{
+    tag "Reference Dowload"
+    label 'process_low'
+    publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
+
+    input:
+    path ('kmerfinder_results/') from ch_kmerfinder_results.collect().ifEmpty([])
+    file reference_bacteria_file from ch_reference_ncbi_bacteria
+
+    nucleotide_end='_genomic.fna.gz'
+    protein_end='_protein.faa.gz'
+    gff_end='_genomic.gff.gz'
+    output:
+    file 'REFERENCES/*_genomic.fna' into ch_reference_fna
+    file 'REFERENCES/*_protein.faa' into ch_reference_protein
+    file 'REFERENCES/*_genomic.gff' into ch_reference_gff
+    file 'references_found.tsv'
+
+    script:
+    """
+    find_common_reference.py -d kmerfinder_results -o references_found.tsv
+    bacteria_id=\$(head -n1 references_found.tsv | cut -f1 -d\$'\t')
+    ftp_path=\$(grep "\$bacteria_id" $reference_bacteria_file | cut -f20)
+    download_reference.py -url \$ftp_path -out_dir REFERENCES
+    gunzip REFERENCES/*.gz
+    """
+}
+
+/*
+ * STEP 4 - Download reference L
+ */
+
+process UNICYCLER {
+	tag "$prefix"
+    label 'process_low'
+	publishDir path: { "${params.outdir}/unicycler" }, mode: 'copy'
+
+	input:
+	set file(readsR1),file(readsR2) from ch_fastp_unicycler
+
+	output:
+	file "${prefix}_assembly.fasta" into ch_unicycler_quast, ch_unicycler_prokka
+
+	script:
+	prefix = readsR1.toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_paired)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
+	"""
+	unicycler --threads ${task.cpus} -1 $readsR1 -2 $readsR2  -o .
+	mv assembly.fasta $prefix"_assembly.fasta"
+    mv assembly.gfa $prefix"_assembly.gfa
+	"""
+}
+
+/*
+ * STEP 3 - Output Description HTML
+ */
+process output_documentation {
+    publishDir "${params.outdir}/pipeline_info", mode: params.publish_dir_mode
+
+    input:
+    file output_docs from ch_output_docs
+    file images from ch_output_docs_images
+
+    output:
+    file 'results_description.html'
+
+    script:
+    """
+    markdown_to_html.py $output_docs -o results_description.html
+    """
+}
+
+
 /*
  * STEP 2 - MultiQC
  */
@@ -597,63 +718,6 @@ process multiqc {
     multiqc -f $rtitle $rfilename $custom_config_file .
     """
 }
-
-/*
- * STEP 2 - MultiQC
- */
-
-process kmerfinder {
-    tag "$sample"
-    label 'process_low'
-
-    publishDir "${params.outdir}/kmerfinder/${sample}", mode: params.publish_dir_mode
-
-
-    input:
-    tuple val(sample), val(single_end), path(reads) from ch_fastp_kmerfider
-    path kmerfinderDB from ch_kmerfinder_db
-    path kmerfinderTAX from ch_kmerfinder_taxonomy
-
-    output:
-    file "*.txt"
-
-    script:
-    """
-
-    IN_READS='-i ${sample}.trim.fastq.gz'
-    if $single_end; then
-        [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
-    else
-        [ ! -f  ${sample}_1.trim.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.trim.fastq.gz
-        [ ! -f  ${sample}_2.trim.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.trim.fastq.gz
-        IN_READS='-i ${sample}_1.trim.fastq.gz  ${sample}_2.trim.fastq.gz'
-    fi
-
-    kmerfinder.py \\
-    \$IN_READS -o ${sample} -db  $kmerfinderDB/bacteria.ATG -tax $kmerfinderTAX  -x
-    """
-}
-
-
-/*
- * STEP 3 - Output Description HTML
- */
-process output_documentation {
-    publishDir "${params.outdir}/pipeline_info", mode: params.publish_dir_mode
-
-    input:
-    file output_docs from ch_output_docs
-    file images from ch_output_docs_images
-
-    output:
-    file 'results_description.html'
-
-    script:
-    """
-    markdown_to_html.py $output_docs -o results_description.html
-    """
-}
-
 /*
  * Completion e-mail notification
  */
