@@ -188,29 +188,34 @@ process get_software_versions {
 }
 
 /*
- * PREPROCESSING: Uncompress genome fasta file
+ * PREPROCESSING: if specie genome fasta is provided check and uncompress genome fasta file if needed
  */
-if (params.fasta.endsWith('.gz')) {
-    process GUNZIP_FASTA {
-        label 'error_retry'
-        if (params.save_reference) {
-            publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+if (params.fasta){
+    if (params.fasta.endsWith('.gz')) {
+        process GUNZIP_FASTA {
+            label 'error_retry'
+            if (params.save_reference) {
+                publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+            }
+
+            input:
+            path fasta from params.fasta
+
+            output:
+            path "$unzip" into ch_fasta
+
+            script:
+            unzip = fasta.toString() - '.gz'
+            """
+            pigz -f -d -p $task.cpus $fasta
+            """
         }
-
-        input:
-        path fasta from params.fasta
-
-        output:
-        path "$unzip" into ch_fasta
-
-        script:
-        unzip = fasta.toString() - '.gz'
-        """
-        pigz -f -d -p $task.cpus $fasta
-        """
+    } else {
+        ch_fasta = file(params.fasta)
     }
 } else {
-    ch_fasta = file(params.fasta)
+    //See: https://nextflow-io.github.io/patterns/index.html#_optional_input
+    ch_fasta = file('NO_FILE')
 }
 
 /*
@@ -651,17 +656,16 @@ process UNICYCLER {
 	publishDir path: { "${params.outdir}/unicycler" }, mode: 'copy'
 
 	input:
-	set file(readsR1),file(readsR2) from ch_fastp_unicycler
-
+	//set file(readsR1),file(readsR2) from ch_fastp_unicycler
+    tuple val(sample), val(single_end), path(reads) from ch_fastp_unicycler
 	output:
 	file "${prefix}_assembly.fasta" into ch_unicycler_quast, ch_unicycler_prokka
 
 	script:
-	prefix = readsR1.toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_paired)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
+	//prefix = readsR1.toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_paired)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
 	"""
-	unicycler --threads ${task.cpus} -1 $readsR1 -2 $readsR2  -o .
-	mv assembly.fasta $prefix"_assembly.fasta"
-    mv assembly.gfa $prefix"_assembly.gfa
+	unicycler --threads ${task.cpus} -1 ${sample}_1.trim.fastq.gz -2${sample}_2.trim.fastq.gz  -o .
+	
 	"""
 }
 
