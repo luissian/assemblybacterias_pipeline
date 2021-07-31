@@ -24,7 +24,7 @@ fi
 import sys
 import argparse
 import os
-import urllib.request
+import wget
 
 def parse_args(args=None):
     Description = 'download the reference files (fna, faa, gff) from the reference ncbi file.'
@@ -41,8 +41,8 @@ def download_references (url, out_dir):
     reference_file = url.split('/')[-1]
     for r_end in reference_ends:
         out_file = os.path.join(out_dir,reference_file + r_end)
-        urllib.request.urlretrieve(url + '/' + reference_file + r_end , out_file)
-        # urllib.request.urlretrieve("http://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/003/236/605/GCA_003236605.1_ASM323660v1/GCA_003236605.1_ASM323660v1_genomic.fna.gz", "GCA_003236605.1_genomic.fna.gz")
+        file_url = url + '/' + reference_file + r_end
+        wget.download(file_url, out_file)
     return
 
 def main(args=None):

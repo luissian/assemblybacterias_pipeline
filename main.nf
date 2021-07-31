@@ -578,45 +578,71 @@ process FASTP {
 /*
  * STEP 3 - Kmerfinder
  */
+if (params.used_external_reference == false ){
+    process kmerfinder {
+        tag "$sample"
+        label 'process_low'
 
-process kmerfinder {
-    tag "$sample"
-    label 'process_low'
+        publishDir "${params.outdir}/kmerfinder/${sample}", mode: params.publish_dir_mode
 
-    publishDir "${params.outdir}/kmerfinder/${sample}", mode: params.publish_dir_mode
+        input:
+        tuple val(sample), val(single_end), path(reads) from ch_fastp_kmerfider
+        file kmerfinderDB from ch_kmerfinder_db
+        file kmerfinderTAX from ch_kmerfinder_taxonomy
 
-    input:
-    tuple val(sample), val(single_end), path(reads) from ch_fastp_kmerfider
-    file kmerfinderDB from ch_kmerfinder_db
-    file kmerfinderTAX from ch_kmerfinder_taxonomy
+        output:
+        //path "${sample}/*.txt" into ch_kmerfinder_results
+        path "${sample}_results.txt" into ch_kmerfinder_results
 
-    output:
-    //path "${sample}/*.txt" into ch_kmerfinder_results
-    path "${sample}_results.txt" into ch_kmerfinder_results
+        script:
+        """
+        IN_READS='-i ${sample}.trim.fastq.gz'
+        if $single_end; then
+            [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
+        else
+            [ ! -f  ${sample}_1.trim.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.trim.fastq.gz
+            [ ! -f  ${sample}_2.trim.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.trim.fastq.gz
+            IN_READS='-i ${sample}_1.trim.fastq.gz  ${sample}_2.trim.fastq.gz'
+        fi
 
-    script:
-    """
-    IN_READS='-i ${sample}.trim.fastq.gz'
-    if $single_end; then
-        [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
-    else
-        [ ! -f  ${sample}_1.trim.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.trim.fastq.gz
-        [ ! -f  ${sample}_2.trim.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.trim.fastq.gz
-        IN_READS='-i ${sample}_1.trim.fastq.gz  ${sample}_2.trim.fastq.gz'
-    fi
-
-    kmerfinder.py \\
-    \$IN_READS -o ${sample} \\
-    -db  $kmerfinderDB/bacteria.ATG \\
-    -tax $kmerfinderTAX  -x
-    mv ${sample}/results.txt ${sample}_results.txt
-    """
+        kmerfinder.py \\
+        \$IN_READS -o ${sample} \\
+        -db  $kmerfinderDB/bacteria.ATG \\
+        -tax $kmerfinderTAX  -x
+        mv ${sample}/results.txt ${sample}_results.txt
+        """
+    }
 }
 
-
 /*
- * STEP 4 - Download reference L
+ * STEP 4 - Find common reference from kmerfinder results
  */
+if (params.used_external_reference == false ){
+    process FIND_COMMON_REFERENCE{
+        tag "Find common Reference"
+        label 'process_low'
+        publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
+
+        input:
+        path ('kmerfinder_results/') from ch_kmerfinder_results.collect().ifEmpty([])
+        // file reference_bacteria_file from ch_reference_ncbi_bacteria
+
+        nucleotide_end='_genomic.fna.gz'
+        protein_end='_protein.faa.gz'
+        gff_end='_genomic.gff.gz'
+        output:
+        file 'references_found.tsv'
+        file 'bacteria_id' into ch_findcomon_download
+
+        script:
+        """
+        find_common_reference.py -d kmerfinder_results -o references_found.tsv
+        bacteria_id=\$(head -n1 references_found.tsv | cut -f1 -d\$'\t')
+        echo \$bacteria_id > 'bacteria_id'
+        """
+
+    }
+}
 
 process REFERENCE_DOWNLOAD{
     tag "Reference Dowload"
@@ -624,8 +650,10 @@ process REFERENCE_DOWNLOAD{
     publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
 
     input:
-    path ('kmerfinder_results/') from ch_kmerfinder_results.collect().ifEmpty([])
+    file bacteria_file_id from ch_findcomon_download
+
     file reference_bacteria_file from ch_reference_ncbi_bacteria
+
 
     nucleotide_end='_genomic.fna.gz'
     protein_end='_protein.faa.gz'
@@ -634,22 +662,22 @@ process REFERENCE_DOWNLOAD{
     file 'REFERENCES/*_genomic.fna' into ch_reference_fna
     file 'REFERENCES/*_protein.faa' into ch_reference_protein
     file 'REFERENCES/*_genomic.gff' into ch_reference_gff
-    file 'references_found.tsv'
+    // file 'references_found.tsv'
+
 
     script:
     """
-    find_common_reference.py -d kmerfinder_results -o references_found.tsv
-    bacteria_id=\$(head -n1 references_found.tsv | cut -f1 -d\$'\t')
-    ftp_path=\$(grep "\$bacteria_id" $reference_bacteria_file | cut -f20)
+    bacteriaID=\$(cat ${bacteria_file_id})
+    ftp_path=\$(grep "\$bacteriaID" $reference_bacteria_file | cut -f20)
+    echo \$ftp_path > path_ftp
     download_reference.py -url \$ftp_path -out_dir REFERENCES
     gunzip REFERENCES/*.gz
     """
 }
-
 /*
  * STEP 4 - Download reference L
  */
-
+/*
 process UNICYCLER {
 	tag "$prefix"
     label 'process_low'
@@ -665,9 +693,10 @@ process UNICYCLER {
 	//prefix = readsR1.toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_paired)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
 	"""
 	unicycler --threads ${task.cpus} -1 ${sample}_1.trim.fastq.gz -2${sample}_2.trim.fastq.gz  -o .
-	
+
 	"""
 }
+*/
 
 /*
  * STEP 3 - Output Description HTML
