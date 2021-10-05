@@ -34,7 +34,6 @@ ch_kmerfinder_db = file(params.bacteria_database)
 
 if (params.bacteria_taxonomy) { ch_kmerfinder_taxonomy = file(params.bacteria_taxonomy, checkIfExists: true) } else { exit 1, "Kmerfinder taxonmy file does not exist" }
 
-
 if (params.reference_ncbi_bacteria) {ch_reference_ncbi_bacteria = file(params.reference_ncbi_bacteria, checkIfExists: true)} else {exit 1, "Bacteria reference file does not exist"}
 ////////////////////////////////////////////////////
 /* --     Collect configuration parameters     -- */
@@ -102,11 +101,8 @@ if (params.input_paths) {
 }
 */
 
-
-
-
 ////////////////////////////////////////////////////
-/* --         PRINT PARAMETER SUMMARY          -- */
+/* --               PARAMETER SUMMARY          -- */
 ////////////////////////////////////////////////////
 log.info NfcoreSchema.params_summary_log(workflow, params, json_schema)
 
@@ -188,7 +184,7 @@ process get_software_versions {
 }
 
 /*
- * PREPROCESSING: if specie genome fasta is provided check and uncompress genome fasta file if needed
+ * PREPROCESSING: if reference fasta is provided, check and uncompress
  */
 if (params.fasta){
     if (params.fasta.endsWith('.gz')) {
@@ -251,11 +247,9 @@ if (params.gff) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-///////////////////////////////////////////////////////////////////////////////
 /* --                                                                     -- */
 /* --                     PARSE DESIGN FILE                               -- */
 /* --                                                                     -- */
-///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -445,7 +439,7 @@ ch_reads_all
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * STEP 2: Merge FastQ files with the same sample identifier
+ * Merge FastQ files with the same sample identifier
  */
 process CAT_FASTQ {
     tag "$sample"
@@ -488,7 +482,7 @@ process CAT_FASTQ {
 }
 
 /*
- * STEP 3 - FastQC
+ * STEP 1 - FastQC
  */
 
 process FASTQC {
@@ -511,9 +505,8 @@ process FASTQC {
     """
 }
 
-
 /*
- * STEP 4: Fastp adapter trimming and quality filtering
+ * STEP 2: Fastp adapter and quality filtering
  */
 
 process FASTP {
@@ -540,23 +533,14 @@ process FASTP {
         path "*.fail.fastq.gz"
 
         script:
-        // Added soft-links to original fastqs for consistent naming in MultiQC
+        in_reads = single_end ? "--in1 ${reads}" : "--in1 ${reads[0]} --in2 ${reads[1]}"
+        out_reads = single_end ? "--out1 ${sample}.trim.fastq.gz --failed_out ${sample}.fail.fastq.gz" : "--out1 ${sample}_1.trim.fastq.gz --out2 ${sample}_2.trim.fastq.gz --unpaired1 ${sample}_1.fail.fastq.gz --unpaired2 ${sample}_2.fail.fastq.gz"
         autodetect = single_end ? "" : "--detect_adapter_for_pe"
+        
         """
-        IN_READS='--in1 ${sample}.fastq.gz'
-        OUT_READS='--out1 ${sample}.trim.fastq.gz --failed_out ${sample}.fail.fastq.gz'
-        if $single_end; then
-            [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
-        else
-            [ ! -f  ${sample}_1.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.fastq.gz
-            [ ! -f  ${sample}_2.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.fastq.gz
-            IN_READS='--in1 ${sample}_1.fastq.gz --in2 ${sample}_2.fastq.gz'
-            OUT_READS='--out1 ${sample}_1.trim.fastq.gz --out2 ${sample}_2.trim.fastq.gz --unpaired1 ${sample}_1.fail.fastq.gz --unpaired2 ${sample}_2.fail.fastq.gz'
-        fi
-
         fastp \\
-            \$IN_READS \\
-            \$OUT_READS \\
+            $in_reads\\
+            $out_reads \\
             $autodetect \\
             --cut_front \\
             --cut_tail \\
@@ -573,10 +557,8 @@ process FASTP {
         """
 }
 
-
-
 /*
- * STEP 3 - Kmerfinder
+ * STEP 3 - Kmerfinder to find references
  */
 if (params.used_external_reference == false ){
     process KMERFINDER {
@@ -595,18 +577,10 @@ if (params.used_external_reference == false ){
         path "${sample}_results.txt" into ch_kmerfinder_results
 
         script:
+        in_reads = single_end ? "-i ${reads}" : "-i ${reads[0]} ${reads[1]}"
         """
-        IN_READS='-i ${sample}.trim.fastq.gz'
-        if $single_end; then
-            [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
-        else
-            [ ! -f  ${sample}_1.trim.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.trim.fastq.gz
-            [ ! -f  ${sample}_2.trim.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.trim.fastq.gz
-            IN_READS='-i ${sample}_1.trim.fastq.gz  ${sample}_2.trim.fastq.gz'
-        fi
-
         kmerfinder.py \\
-        \$IN_READS -o ${sample} \\
+        ${in_reads} -o ${sample} \\
         -db  $kmerfinderDB/bacteria.ATG \\
         -tax $kmerfinderTAX  -x
         mv ${sample}/results.txt ${sample}_results.txt
@@ -615,9 +589,10 @@ if (params.used_external_reference == false ){
 }
 
 /*
- * STEP 4 - Find common reference from kmerfinder results
+ * STEP 4 - Find and download reference from kmerfinder results
  */
-if (params.used_external_reference == false ){
+if (params.used_external_reference == false ) {
+    
     process FIND_COMMON_REFERENCE {
         tag "Find common Reference"
         label 'process_low'
@@ -627,9 +602,6 @@ if (params.used_external_reference == false ){
         path ('kmerfinder_results/') from ch_kmerfinder_results.collect().ifEmpty([])
         // file reference_bacteria_file from ch_reference_ncbi_bacteria
 
-        nucleotide_end='_genomic.fna.gz'
-        protein_end='_protein.faa.gz'
-        gff_end='_genomic.gff.gz'
         output:
         file 'references_found.tsv'
         file 'bacteria_id' into ch_findcomon_download
@@ -651,13 +623,8 @@ process REFERENCE_DOWNLOAD {
 
     input:
     file bacteria_file_id from ch_findcomon_download
-
     file reference_bacteria_file from ch_reference_ncbi_bacteria
 
-
-    nucleotide_end='_genomic.fna.gz'
-    protein_end='_protein.faa.gz'
-    gff_end='_genomic.gff.gz'
     output:
     file 'REFERENCES/*_genomic.fna' into ch_reference_fna
     file 'REFERENCES/*_protein.faa' into ch_reference_protein
@@ -674,26 +641,26 @@ process REFERENCE_DOWNLOAD {
     gunzip REFERENCES/*.gz
     """
 }
+
 /*
- * STEP 4 - Download reference L
+ * STEP 5 - Assembly of reads with the chosen reference
  */
-/*
+
 process UNICYCLER {
 	tag "$prefix"
     label 'process_low'
 	publishDir path: { "${params.outdir}/unicycler" }, mode: 'copy'
 
 	input:
-	//set file(readsR1),file(readsR2) from ch_fastp_unicycler
     tuple val(sample), val(single_end), path(reads) from ch_fastp_unicycler
+
 	output:
 	file "${prefix}_assembly.fasta" into ch_unicycler_quast, ch_unicycler_prokka
 
 	script:
-	//prefix = readsR1.toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_paired)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
+
 	"""
 	unicycler --threads ${task.cpus} -1 ${sample}_1.trim.fastq.gz -2${sample}_2.trim.fastq.gz  -o .
-
 	"""
 }
 */
@@ -719,7 +686,7 @@ process OUTPUT_DOCUMENTATION {
 
 
 /*
- * STEP 2 - MultiQC
+ * MultiQC
  */
 
 process MULTIQC {

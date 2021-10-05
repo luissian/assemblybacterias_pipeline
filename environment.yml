@@ -20,7 +20,7 @@ dependencies:
   - bioconda::quast=5.0.2
   - bioconda::prokka=1.14.6
   - bioconda::pilon=1.24
-  #  SPAdes cannot be a version later than v3.13.0.
+  # SPAdes cannot be a version later than v3.13.0.
   # This is because after that version, SPAdes stopped saving intermediate files that Unicycler needs.
   - bioconda::spades=3.13.0
   #- pip
