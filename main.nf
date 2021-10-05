@@ -491,7 +491,7 @@ process CAT_FASTQ {
  * STEP 3 - FastQC
  */
 
-process fastqc {
+process FASTQC {
     tag "$name"
     label 'process_low'
     publishDir "${params.outdir}/fastqc", mode: params.publish_dir_mode,
@@ -579,7 +579,7 @@ process FASTP {
  * STEP 3 - Kmerfinder
  */
 if (params.used_external_reference == false ){
-    process kmerfinder {
+    process KMERFINDER {
         tag "$sample"
         label 'process_low'
 
@@ -618,7 +618,7 @@ if (params.used_external_reference == false ){
  * STEP 4 - Find common reference from kmerfinder results
  */
 if (params.used_external_reference == false ){
-    process FIND_COMMON_REFERENCE{
+    process FIND_COMMON_REFERENCE {
         tag "Find common Reference"
         label 'process_low'
         publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
@@ -644,7 +644,7 @@ if (params.used_external_reference == false ){
     }
 }
 
-process REFERENCE_DOWNLOAD{
+process REFERENCE_DOWNLOAD {
     tag "Reference Dowload"
     label 'process_low'
     publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
@@ -701,7 +701,7 @@ process UNICYCLER {
 /*
  * STEP 3 - Output Description HTML
  */
-process output_documentation {
+process OUTPUT_DOCUMENTATION {
     publishDir "${params.outdir}/pipeline_info", mode: params.publish_dir_mode
 
     input:
@@ -722,7 +722,7 @@ process output_documentation {
  * STEP 2 - MultiQC
  */
 
-process multiqc {
+process MULTIQC {
     publishDir "${params.outdir}/MultiQC", mode: params.publish_dir_mode
 
     input:
