@@ -608,6 +608,7 @@ if (!params.used_external_reference) {
 
         input:
         path(kmerfinder_results) from ch_kmerfinder_results.collect().ifEmpty([])
+        file(reference_bacteria_file) from ch_reference_ncbi_bacteria
 
         output:
         tuple path("*_genomic.fna"), path("*_genomic.gff") into quast_references
@@ -619,7 +620,7 @@ if (!params.used_external_reference) {
         mv $kmerfinder_results kmerfinder_resultsdir
 
         find_common_reference.py -d kmerfinder_resultsdir -o references_found.tsv
-        download_reference.py -file references_found.tsv
+        download_reference.py -file references_found.tsv -reference ${reference_bacteria_file} -out_dir .
         """
     }
 }

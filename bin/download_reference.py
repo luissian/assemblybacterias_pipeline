@@ -36,11 +36,12 @@ def parse_args(args=None):
 
     parser = argparse.ArgumentParser(description=Description, epilog=Epilog)
     parser.add_argument('-file', help="file containing the path for download.")
+    parser.add_argument('-reference', help="reference for downloads.")
     parser.add_argument('-out_dir', help="Output directory.")
     
     return parser.parse_args(args)
 
-def download_references (path, out_dir):
+def download_references (path,  ,out_dir):
     reference_ends = ['_genomic.fna.gz','_protein.faa.gz', '_genomic.gff.gz']
     
     with open(path) as infile:
