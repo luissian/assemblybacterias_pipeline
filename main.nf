@@ -113,6 +113,7 @@ summary['Run Name']         = workflow.runName
 // TODO nf-core: Report custom parameters here
 summary['Input']            = params.input
 summary['Fasta Ref']        = params.fasta
+summary['Gram']             = params.gram
 if (params.gff)                        summary['GFF'] = params.gff
 //summary['Data Type']        = params.single_end ? 'Single-End' : 'Paired-End'
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
