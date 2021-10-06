@@ -666,6 +666,47 @@ process UNICYCLER {
 }
 */
 
+process QUAST {
+	tag "$prefix"
+    label 'process_medium'
+	publishDir path: {"${params.outdir}/quast"}, mode: 'copy',
+						saveAs: { filename -> if(filename == "quast_results") "${prefix}_quast_results"}
+
+	input:
+	file scaffolds from scaffold_quast.collect()
+	file fasta from fasta_file
+	file gtf from gtf_file
+
+	output:
+	file "quast_results" into quast_results
+	file "quast_results/latest/report.tsv" into quast_multiqc
+
+	script:
+	prefix = scaffolds[0].toString() - ~/(_scaffolds\.fasta)?$/
+	"""
+	quast.py -R $fasta -G $gtf --threads ${task.cpus} $scaffolds
+	"""
+}
+
+
+process PROKKA {
+	tag "$prefix"
+	publishDir path: {"${params.outdir}/prokka"}, mode: 'copy',
+						saveAs: { filename -> if(filename == "prokka_results") "${prefix}_prokka"}
+
+	input:
+	file scaffold from scaffold_prokka
+
+	output:
+	file "prokka_results" into prokka_results
+
+	script:
+	prefix = scaffold.toString() - ~/(_paired_assembly\.fasta)?$/
+	"""
+	prokka --force --outdir prokka_results --prefix $prefix --addgenes  --kingdom Bacteria --usegenus --gram - --locustag $prefix --centre CNM --compliant $scaffold
+	"""
+}
+
 /*
  * STEP 3 - Output Description HTML
  */
