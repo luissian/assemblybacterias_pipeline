@@ -112,9 +112,11 @@ if (workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Run Name']         = workflow.runName
 // TODO nf-core: Report custom parameters here
 summary['Input']            = params.input
-summary['Fasta Ref']        = params.fasta
+if (params.used_external_reference) summary['Reference'] = "External"
+if (params.used_external_reference) summary['Fasta reference'] = params.reference_fasta
+if (params.used_external_reference) summary['GFF reference'] = params.reference_gff
+if (!params.used_external_reference) summary['Reference'] = "To Download"
 summary['Gram']             = params.gram
-if (params.gff)                        summary['GFF'] = params.gff
 //summary['Data Type']        = params.single_end ? 'Single-End' : 'Paired-End'
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
 if (workflow.containerEngine) summary['Container'] = "$workflow.containerEngine - $workflow.container"
@@ -174,77 +176,81 @@ process get_software_versions {
 
     script:
     // TODO nf-core: Get all tools to print their version number here
+    //     kmerfinder > v_kmerfinder.txt
+    //     quast > v_quast.txt
+    //     prokka > v_prokka.txt
     """
     echo $workflow.manifest.version > v_pipeline.txt
     echo $workflow.nextflow.version > v_nextflow.txt
     fastqc --version > v_fastqc.txt
     multiqc --version > v_multiqc.txt
     fastp --version > v_fastp.txt
+
     scrape_software_versions.py &> software_versions_mqc.yaml
     """
 }
 
 /*
- * PREPROCESSING: if reference fasta is provided, check and uncompress
+ * PREPROCESSING: check and uncompress references
  */
-if (params.fasta){
-    if (params.fasta.endsWith('.gz')) {
-        process GUNZIP_FASTA {
-            label 'error_retry'
-            if (params.save_reference) {
-                publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+
+if ( params.used_external_reference ) {
+
+    if (params.reference_fasta){
+        file(params.reference_fasta, checkIfExists: true)
+        if (params.reference_fasta.endsWith('.gz')) {
+
+            process GUNZIP_FASTA {
+                label 'error_retry'
+                if (params.save_reference) {
+                    publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+                }
+
+                input:
+                path(fasta) from params.fasta
+
+                output:
+                path(unzip) into fasta_reference
+
+                script:
+                unzip = fasta.toString() - '.gz'
+                """
+                pigz -f -d -p $task.cpus $fasta
+                """
             }
-
-            input:
-            path fasta from params.fasta
-
-            output:
-            path "$unzip" into ch_fasta
-
-            script:
-            unzip = fasta.toString() - '.gz'
-            """
-            pigz -f -d -p $task.cpus $fasta
-            """
+        } else {
+            Channel.fromPath(params.reference_fasta).set { fasta_reference }
         }
-    } else {
-        ch_fasta = file(params.fasta)
     }
-} else {
-    //See: https://nextflow-io.github.io/patterns/index.html#_optional_input
-    ch_fasta = file('NO_FILE')
-}
 
-/*
- * PREPROCESSING: Uncompress gff annotation file
- */
-if (params.gff) {
-    file(params.gff, checkIfExists: true)
-    if (params.gff.endsWith('.gz')) {
-        process GUNZIP_GFF {
-            label 'error_retry'
-            if (params.save_reference) {
-                publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+    if (params.reference_gff) {
+        file(params.reference_gff, checkIfExists: true)
+        if (params.reference_gff.endsWith('.gz')) {
+            
+            process GUNZIP_GFF {
+                label 'error_retry'
+                if (params.save_reference) {
+                    publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+                }
+
+                input:
+                path(gff) from params.gff
+
+                output:
+                path(unzip) into gff_reference
+
+                script:
+                unzip = gff.toString() - '.gz'
+                """
+                pigz -f -d -p $task.cpus $gff
+                """
             }
-
-            input:
-            path gff from params.gff
-
-            output:
-            path "$unzip" into ch_gff
-
-            script:
-            unzip = gff.toString() - '.gz'
-            """
-            pigz -f -d -p $task.cpus $gff
-            """
+        } else {
+            Channel.fromPath(params.reference_gff).set { gff_reference }
         }
-    } else {
-        ch_gff = file(params.gff)
     }
-} else {
-    //See: https://nextflow-io.github.io/patterns/index.html#_optional_input
-    ch_gff = file('NO_FILE')
+
+    fasta_reference.combine(gff_reference).set { quast_references }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -561,7 +567,7 @@ process FASTP {
 /*
  * STEP 3 - Kmerfinder to find references
  */
-if (params.used_external_reference == false ){
+if (!params.used_external_reference){
     
     process KMERFINDER {
         tag "$samplename"
@@ -593,10 +599,10 @@ if (params.used_external_reference == false ){
 /*
  * STEP 4 - Find and download reference from kmerfinder results
  */
-if (params.used_external_reference == false ) {
+if (!params.used_external_reference) {
     
     process FIND_DOWNLOAD_COMMON_REFERENCE {
-        
+
         label 'process_low'
         publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
 
@@ -604,8 +610,8 @@ if (params.used_external_reference == false ) {
         path(kmerfinder_results) from ch_kmerfinder_results.collect().ifEmpty([])
 
         output:
-        tuple path("*_genomic.fna"), path("*_genomic.gff") into downloaded_references
-        path("references_found")
+        tuple path("*_genomic.fna"), path("*_genomic.gff") into quast_references
+        path("references_found.tsv")
 
         script:
         """
@@ -615,7 +621,6 @@ if (params.used_external_reference == false ) {
         find_common_reference.py -d kmerfinder_resultsdir -o references_found.tsv
         download_reference.py -file references_found.tsv
         """
-
     }
 }
 
@@ -684,8 +689,8 @@ process QUAST {
 
 	input:
 
-	path(scaffolds) from scaffold_quast.collect()
-    tuple path(reference_fasta), path(reference_gff) from (downloaded_references)
+	path(scaffolds) from ch_unicycler_quast.collect()
+    tuple path(reference_fasta), path(reference_gff) from quast_references
 
 	output:
 	path("quast_results") into quast_results
@@ -702,7 +707,6 @@ process QUAST {
 	"""
 }
 
-
 process PROKKA {
     tag "${samplename}"
     label 'process_medium'
@@ -711,7 +715,7 @@ process PROKKA {
 						saveAs: { filename -> if(filename == "prokka_results") "${prefix}_prokka"}
 
 	input:
-	path(scaffold) from scaffold_prokka
+	tuple val(samplename), val(single_end), path(scaffold) from ch_unicycler_prokka
 
 	output:
 	path("prokka_results") into prokka_results
@@ -763,27 +767,26 @@ process MULTIQC {
     publishDir "${params.outdir}/MultiQC", mode: params.publish_dir_mode
 
     input:
-    file (multiqc_config) from ch_multiqc_config
-    file (mqc_custom_config) from ch_multiqc_custom_config.collect().ifEmpty([])
+    path(multiqc_config) from ch_multiqc_config
+    path(mqc_custom_config) from ch_multiqc_custom_config.collect().ifEmpty([])
     // TODO nf-core: Add in log files from your new processes for MultiQC to find!
-    file ('fastqc/*') from ch_fastqc_results.collect().ifEmpty([])
-    file ('software_versions/*') from ch_software_versions_yaml.collect()
-    file workflow_summary from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
+    
+    path('fastqc/*') from ch_fastqc_results.collect().ifEmpty([])
+    path('software_versions/*') from ch_software_versions_yaml.collect()
+    path(workflow_summary) from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
 
     output:
-    file "*multiqc_report.html" into ch_multiqc_report
-    file "*_data"
-    file "multiqc_plots"
+    path("*multiqc_report.html") into ch_multiqc_report
+    path("*_data")
+    path("multiqc_plots")
 
     script:
-    rtitle = ''
-    rfilename = ''
     if (!(workflow.runName ==~ /[a-z]+_[a-z]+/)) {
         rtitle = "--title \"${workflow.runName}\""
         rfilename = "--filename " + workflow.runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report"
     }
     custom_config_file = params.multiqc_config ? "--config $mqc_custom_config" : ''
-    // TODO nf-core: Specify which MultiQC modules to use with -m for a faster run time
+    
     """
     multiqc -f $rtitle $rfilename $custom_config_file .
     """
