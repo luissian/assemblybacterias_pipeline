@@ -664,7 +664,6 @@ process UNICYCLER {
 	unicycler --threads ${task.cpus} -1 ${sample}_1.trim.fastq.gz -2${sample}_2.trim.fastq.gz  -o .
 	"""
 }
-*/
 
 process QUAST {
 	tag "$prefix"
@@ -703,7 +702,7 @@ process PROKKA {
 	script:
 	prefix = scaffold.toString() - ~/(_paired_assembly\.fasta)?$/
 	"""
-	prokka --force --outdir prokka_results --prefix $prefix --addgenes  --kingdom Bacteria --usegenus --gram - --locustag $prefix --centre CNM --compliant $scaffold
+	prokka --force --outdir prokka_results --prefix $prefix --addgenes  --kingdom Bacteria --usegenus --gram $params.gram --locustag $prefix --centre CNM --compliant $scaffold
 	"""
 }
 
