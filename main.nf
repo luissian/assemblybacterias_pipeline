@@ -265,7 +265,7 @@ process CHECK_SAMPLESHEET {
                 }
 
     input:
-    path samplesheet from ch_input
+    path(samplesheet) from ch_input
 
     output:
     path "samplesheet.valid.csv" into ch_samplesheet_reformat
@@ -344,7 +344,7 @@ if (!params.skip_sra || !isOffline()) {
                 ch_reads_sra_dump }
 
     process SRA_FASTQ_FTP {
-        tag "$sample"
+        tag "$samplename"
         label 'process_medium'
         label 'error_retry'
         publishDir "${params.outdir}/preprocess/sra", mode: params.publish_dir_mode,
@@ -357,33 +357,33 @@ if (!params.skip_sra || !isOffline()) {
         is_ftp
 
         input:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), val(fastq), val(md5) from ch_reads_sra_ftp
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp), val(fastq), val(md5) from ch_reads_sra_ftp
 
         output:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_ftp
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_ftp
         path "*.md5"
 
         script:
         if (single_end) {
             """
-            curl -L ${fastq[0]} -o ${sample}.fastq.gz
-            echo "${md5[0]}  ${sample}.fastq.gz" > ${sample}.fastq.gz.md5
-            md5sum -c ${sample}.fastq.gz.md5
+            curl -L ${fastq[0]} -o ${samplename}.fastq.gz
+            echo "${md5[0]}  ${samplename}.fastq.gz" > ${samplename}.fastq.gz.md5
+            md5sum -c ${samplename}.fastq.gz.md5
             """
         } else {
             """
-            curl -L ${fastq[0]} -o ${sample}_1.fastq.gz
-            echo "${md5[0]}  ${sample}_1.fastq.gz" > ${sample}_1.fastq.gz.md5
-            md5sum -c ${sample}_1.fastq.gz.md5
-            curl -L ${fastq[1]} -o ${sample}_2.fastq.gz
-            echo "${md5[1]}  ${sample}_2.fastq.gz" > ${sample}_2.fastq.gz.md5
-            md5sum -c ${sample}_2.fastq.gz.md5
+            curl -L ${fastq[0]} -o ${samplename}_1.fastq.gz
+            echo "${md5[0]}  ${samplename}_1.fastq.gz" > ${samplename}_1.fastq.gz.md5
+            md5sum -c ${samplename}_1.fastq.gz.md5
+            curl -L ${fastq[1]} -o ${samplename}_2.fastq.gz
+            echo "${md5[1]}  ${samplename}_2.fastq.gz" > ${samplename}_2.fastq.gz.md5
+            md5sum -c ${samplename}_2.fastq.gz.md5
             """
         }
     }
 
     process SRA_FASTQ_DUMP {
-        tag "$sample"
+        tag "$samplename"
         label 'process_medium'
         label 'error_retry'
         publishDir "${params.outdir}/preprocess/sra", mode: params.publish_dir_mode,
@@ -396,14 +396,14 @@ if (!params.skip_sra || !isOffline()) {
         !is_ftp
 
         input:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp) from ch_reads_sra_dump.map { it[0..3] }
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp) from ch_reads_sra_dump.map { it[0..3] }
 
         output:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_dump
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_dump
         path "*.log"
 
         script:
-        prefix = "${sample.split('_')[0..-2].join('_')}"
+        prefix = "${samplename.split('_')[0..-2].join('_')}"
         pe = single_end ? "" : "--readids --split-e"
         rm_orphan = single_end ? "" : "[ -f  ${prefix}.fastq.gz ] && rm ${prefix}.fastq.gz"
         """
@@ -443,13 +443,13 @@ ch_reads_all
  * Merge FastQ files with the same sample identifier
  */
 process CAT_FASTQ {
-    tag "$sample"
+    tag "$samplename"
 
     input:
-    tuple val(sample), val(single_end), path(reads) from ch_reads_all
+    tuple val(samplename), val(single_end), path(reads) from ch_reads_all
 
     output:
-    tuple val(sample), val(single_end), path("*.merged.fastq.gz") into ch_cat_fastqc,
+    tuple val(samplename), val(single_end), path("*.merged.fastq.gz") into ch_cat_fastqc,
                                                                        ch_cat_fastp
 
     script:
@@ -460,23 +460,23 @@ process CAT_FASTQ {
             def read2 = []
             readList.eachWithIndex{ v, ix -> ( ix & 1 ? read2 : read1 ) << v }
             """
-            cat ${read1.sort().join(' ')} > ${sample}_1.merged.fastq.gz
-            cat ${read2.sort().join(' ')} > ${sample}_2.merged.fastq.gz
+            cat ${read1.sort().join(' ')} > ${samplename}_1.merged.fastq.gz
+            cat ${read2.sort().join(' ')} > ${samplename}_2.merged.fastq.gz
             """
         } else {
             """
-            ln -s ${reads[0]} ${sample}_1.merged.fastq.gz
-            ln -s ${reads[1]} ${sample}_2.merged.fastq.gz
+            ln -s ${reads[0]} ${samplename}_1.merged.fastq.gz
+            ln -s ${reads[1]} ${samplename}_2.merged.fastq.gz
             """
         }
     } else {
         if (readList.size > 1) {
             """
-            cat ${readList.sort().join(' ')} > ${sample}.merged.fastq.gz
+            cat ${readList.sort().join(' ')} > ${samplename}.merged.fastq.gz
             """
         } else {
             """
-            ln -s $reads ${sample}.merged.fastq.gz
+            ln -s $reads ${samplename}.merged.fastq.gz
             """
         }
     }
@@ -498,7 +498,7 @@ process FASTQC {
     tuple val(name), val(single_end), path(reads) from ch_cat_fastqc
 
     output:
-    file '*_fastqc.{zip,html}' into ch_fastqc_results
+    path('*_fastqc.{zip,html}') into ch_fastqc_results
 
     script:
     """
@@ -511,7 +511,7 @@ process FASTQC {
  */
 
 process FASTP {
-        tag "$sample"
+        tag "$samplename"
         label 'process_low'
         publishDir "${params.outdir}/preprocess/fastp", mode: params.publish_dir_mode,
             saveAs: { filename ->
@@ -523,24 +523,24 @@ process FASTP {
                         else params.save_trimmed ? filename : null
                     }
         input:
-        tuple val(sample), val(single_end), path(reads) from ch_cat_fastp
+        tuple val(samplename), val(single_end), path(reads) from ch_cat_fastp
 
         output:
-        tuple val(sample), val(single_end), path("*.trim.fastq.gz") into ch_fastp_kmerfider,
+        tuple val(samplename), val(single_end), path("*.trim.fastq.gz") into ch_fastp_kmerfider,
                                                                     ch_fastp_unicycler
-        path "*.json" into ch_fastp_mqc
+        path("*.json") into ch_fastp_mqc
         //path "*_fastqc.{zip,html}" into ch_fastp_fastqc_mqc
-        path "*.{log,fastp.html}"
-        path "*.fail.fastq.gz"
+        path("*.{log,fastp.html}")
+        path("*.fail.fastq.gz")
 
         script:
         in_reads = single_end ? "--in1 ${reads}" : "--in1 ${reads[0]} --in2 ${reads[1]}"
-        out_reads = single_end ? "--out1 ${sample}.trim.fastq.gz --failed_out ${sample}.fail.fastq.gz" : "--out1 ${sample}_1.trim.fastq.gz --out2 ${sample}_2.trim.fastq.gz --unpaired1 ${sample}_1.fail.fastq.gz --unpaired2 ${sample}_2.fail.fastq.gz"
+        out_reads = single_end ? "--out1 ${samplename}.trim.fastq.gz --failed_out ${samplename}.fail.fastq.gz" : "--out1 ${samplename}_1.trim.fastq.gz --out2 ${samplename}_2.trim.fastq.gz --unpaired1 ${samplename}_1.fail.fastq.gz --unpaired2 ${samplename}_2.fail.fastq.gz"
         autodetect = single_end ? "" : "--detect_adapter_for_pe"
         
         """
         fastp \\
-            $in_reads\\
+            $in_reads \\
             $out_reads \\
             $autodetect \\
             --cut_front \\
@@ -551,9 +551,9 @@ process FASTP {
             --length_required $params.min_trim_length \\
             --trim_poly_x \\
             --thread $task.cpus \\
-            --json ${sample}.fastp.json \\
-            --html ${sample}.fastp.html \\
-            2> ${sample}.fastp.log
+            --json ${samplename}.fastp.json \\
+            --html ${samplename}.fastp.html \\
+            2> ${samplename}.fastp.log
 
         """
 }
@@ -562,29 +562,30 @@ process FASTP {
  * STEP 3 - Kmerfinder to find references
  */
 if (params.used_external_reference == false ){
+    
     process KMERFINDER {
-        tag "$sample"
+        tag "$samplename"
         label 'process_low'
 
-        publishDir "${params.outdir}/kmerfinder/${sample}", mode: params.publish_dir_mode
+        publishDir "${params.outdir}/kmerfinder/${samplename}", mode: params.publish_dir_mode
 
         input:
-        tuple val(sample), val(single_end), path(reads) from ch_fastp_kmerfider
-        file kmerfinderDB from ch_kmerfinder_db
-        file kmerfinderTAX from ch_kmerfinder_taxonomy
+        tuple val(samplename), val(single_end), path(reads) from ch_fastp_kmerfider
+        path(kmerfinderDB) from ch_kmerfinder_db
+        path(kmerfinderTAX) from ch_kmerfinder_taxonomy
 
         output:
-        //path "${sample}/*.txt" into ch_kmerfinder_results
-        path "${sample}_results.txt" into ch_kmerfinder_results
+        //path "${samplename}/*.txt" into ch_kmerfinder_results
+        path("${samplename}_results.txt") into ch_kmerfinder_results
 
         script:
         in_reads = single_end ? "-i ${reads}" : "-i ${reads[0]} ${reads[1]}"
         """
         kmerfinder.py \\
-        ${in_reads} -o ${sample} \\
+        ${in_reads} -o ${samplename} \\
         -db  $kmerfinderDB/bacteria.ATG \\
         -tax $kmerfinderTAX  -x
-        mv ${sample}/results.txt ${sample}_results.txt
+        mv ${samplename}/results.txt ${samplename}_results.txt
         """
     }
 }
@@ -594,31 +595,32 @@ if (params.used_external_reference == false ){
  */
 if (params.used_external_reference == false ) {
     
-    process FIND_COMMON_REFERENCE {
-        tag "Find common Reference"
+    process FIND_DOWNLOAD_COMMON_REFERENCE {
+        
         label 'process_low'
         publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
 
         input:
-        path ('kmerfinder_results/') from ch_kmerfinder_results.collect().ifEmpty([])
-        // file reference_bacteria_file from ch_reference_ncbi_bacteria
+        path(kmerfinder_results) from ch_kmerfinder_results.collect().ifEmpty([])
 
         output:
-        file 'references_found.tsv'
-        file 'bacteria_id' into ch_findcomon_download
+        tuple path("*_genomic.fna"), path("*_genomic.gff") into downloaded_references
+        path("references_found")
 
         script:
         """
-        find_common_reference.py -d kmerfinder_results -o references_found.tsv
-        bacteria_id=\$(head -n1 references_found.tsv | cut -f1 -d\$'\t')
-        echo \$bacteria_id > 'bacteria_id'
+        mkdir kmerfinder_resultsdir
+        mv $kmerfinder_results kmerfinder_resultsdir
+
+        find_common_reference.py -d kmerfinder_resultsdir -o references_found.tsv
+        download_reference.py -file references_found.tsv
         """
 
     }
 }
 
+/*
 process REFERENCE_DOWNLOAD {
-    tag "Reference Dowload"
     label 'process_low'
     publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
 
@@ -627,82 +629,108 @@ process REFERENCE_DOWNLOAD {
     file reference_bacteria_file from ch_reference_ncbi_bacteria
 
     output:
+    
     file 'REFERENCES/*_genomic.fna' into ch_reference_fna
     file 'REFERENCES/*_protein.faa' into ch_reference_protein
     file 'REFERENCES/*_genomic.gff' into ch_reference_gff
-    // file 'references_found.tsv'
 
 
     script:
+
     """
-    bacteriaID=\$(cat ${bacteria_file_id})
     ftp_path=\$(grep "\$bacteriaID" $reference_bacteria_file | cut -f20)
     echo \$ftp_path > path_ftp
-    download_reference.py -url \$ftp_path -out_dir REFERENCES
-    gunzip REFERENCES/*.gz
+    download_reference.py -url \$ftp_path -out_dir .
+    gunzip *.gz
+    
     """
 }
+*/
 
 /*
  * STEP 5 - Assembly of reads with the chosen reference
  */
 
 process UNICYCLER {
-	tag "$prefix"
+	tag "${samplename}"
     label 'process_low'
-	publishDir path: { "${params.outdir}/unicycler" }, mode: 'copy'
+	publishDir path: { "${params.outdir}/unicycler" }, mode: params.publish_dir_mode
 
 	input:
-    tuple val(sample), val(single_end), path(reads) from ch_fastp_unicycler
+    tuple val(samplename), val(single_end), path(reads) from ch_fastp_unicycler
 
 	output:
-	file "${prefix}_assembly.fasta" into ch_unicycler_quast, ch_unicycler_prokka
-
+	path("${samplename}/${samplename}}.fasta") into ch_unicycler_quast
+    tuple val(samplename), val(single_end), path("${samplename}/${samplename}}.fasta") into ch_unicycler_prokka
+    
 	script:
+    in_reads = single_end ? "-l ${reads}" : "-1 ${reads[0]} -2 ${reads[1]}"
 
 	"""
-	unicycler --threads ${task.cpus} -1 ${sample}_1.trim.fastq.gz -2${sample}_2.trim.fastq.gz  -o .
+	unicycler \\
+    --threads ${task.cpus}\\
+    ${in_reads} \\
+    --out ${samplename}
+
+    mv ${samplename}/assembly.fasta ${samplename}/${samplename}.fasta
 	"""
 }
 
 process QUAST {
-	tag "$prefix"
+    tag "${reference_fasta}"
     label 'process_medium'
-	publishDir path: {"${params.outdir}/quast"}, mode: 'copy',
+	publishDir path: {"${params.outdir}/quast"}, mode: params.publish_dir_mode,
 						saveAs: { filename -> if(filename == "quast_results") "${prefix}_quast_results"}
 
 	input:
-	file scaffolds from scaffold_quast.collect()
-	file fasta from fasta_file
-	file gtf from gtf_file
+
+	path(scaffolds) from scaffold_quast.collect()
+    tuple path(reference_fasta), path(reference_gff) from (downloaded_references)
 
 	output:
-	file "quast_results" into quast_results
-	file "quast_results/latest/report.tsv" into quast_multiqc
+	path("quast_results") into quast_results
+	path("quast_results/latest/report.tsv") into quast_multiqc
 
 	script:
-	prefix = scaffolds[0].toString() - ~/(_scaffolds\.fasta)?$/
-	"""
-	quast.py -R $fasta -G $gtf --threads ${task.cpus} $scaffolds
+	
+    """
+	quast.py \\
+    -R $reference_fasta \\
+    -G $reference_gff \\
+    --threads ${task.cpus} \\
+    $scaffolds
 	"""
 }
 
 
 process PROKKA {
-	tag "$prefix"
-	publishDir path: {"${params.outdir}/prokka"}, mode: 'copy',
+    tag "${samplename}"
+    label 'process_medium'
+
+	publishDir path: {"${params.outdir}/prokka"}, mode: params.publish_dir_mode,
 						saveAs: { filename -> if(filename == "prokka_results") "${prefix}_prokka"}
 
 	input:
-	file scaffold from scaffold_prokka
+	path(scaffold) from scaffold_prokka
 
 	output:
-	file "prokka_results" into prokka_results
+	path("prokka_results") into prokka_results
 
 	script:
-	prefix = scaffold.toString() - ~/(_paired_assembly\.fasta)?$/
+
 	"""
-	prokka --force --outdir prokka_results --prefix $prefix --addgenes  --kingdom Bacteria --usegenus --gram $params.gram --locustag $prefix --centre CNM --compliant $scaffold
+	prokka \\
+    --force \\
+    --outdir prokka_results \\
+    --prefix $samplename \\
+    --addgenes \\
+    --kingdom Bacteria \\ 
+    --usegenus \\
+    --gram $params.gram \\ 
+    --locustag $samplename \\ 
+    --centre CNM \\
+    --compliant \\
+    ${scaffold}
 	"""
 }
 
@@ -713,8 +741,9 @@ process OUTPUT_DOCUMENTATION {
     publishDir "${params.outdir}/pipeline_info", mode: params.publish_dir_mode
 
     input:
-    file output_docs from ch_output_docs
-    file images from ch_output_docs_images
+    path(output_docs) from ch_output_docs
+    path(images) from ch_output_docs_images
+    // prueba para comprobar si hay diferencia entre pedirle file a un path o viceversa, en principio dará error
 
     output:
     file 'results_description.html'
