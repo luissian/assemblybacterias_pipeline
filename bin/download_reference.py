@@ -32,40 +32,52 @@ import wget
 
 def parse_args(args=None):
     Description = 'download the reference files (fna, faa, gff) from the reference NCBI file.'
-    Epilog = """Example usage: python download_reference.py -file <file with the references> -out_dir <output directory>"""
+    Epilog = """Usage example: python download_reference.py -file <file with the references created by find_common_reference> -reference <file from the NCBI with all bacterial references> -out_dir <output directory>"""
 
     parser = argparse.ArgumentParser(description=Description, epilog=Epilog)
-    parser.add_argument('-file', help="file containing the path for download.")
-    parser.add_argument('-reference', help="reference for downloads.")
+    parser.add_argument('-file', help="File containing the ranking of references from kmerfinder.")
+    parser.add_argument('-reference', help="File containing the paths to bacterial references.")
     parser.add_argument('-out_dir', help="Output directory.")
     
     return parser.parse_args(args)
 
-def download_references (path,  ,out_dir):
+def download_references (file, reference, out_dir):
+    '''
+    Downloads the top reference from the NCBI database 
+    '''
+    
     reference_ends = ['_genomic.fna.gz','_protein.faa.gz', '_genomic.gff.gz']
     
-    with open(path) as infile:
+    # extract the most common reference from file
+    with open(file) as infile:
         infile = infile.readlines()
-        infile = infile[0]
+        top_reference = infile[0]
     
+    # create the outdir
     os.mkdir(out_dir)
-    reference_file = infile.split('/')[-1]
+
+    # open the reference and find the reference
+    with open(reference) as infile:
+        infile = infile.readlines()
+        infile = infile.replace("\n","")split("\t")
+        infile = [row for row in infile if row[] == top_reference]
     
+    # get url
+        url = infile[]  
+    
+
     for r_end in reference_ends:
         
-        out_file = os.path.join(out_dir,reference_file + r_end)
+        out_file = os.file.join(out_dir,reference_file + r_end)
         file_url = url + '/' + reference_file + r_end
         
         wget.download(file_url, out_file)
+    
     return
 
 def main(args=None):
     args = parse_args(args)
-
-    download_references(args.file, args.out_dir)
-
-
-
+    download_references(args.file, args.reference, args.out_dir)
 
 if __name__ == '__main__':
     sys.exit(main())
