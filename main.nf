@@ -565,35 +565,33 @@ process FASTP {
 }
 
 /*
- * STEP 3 - Kmerfinder to find references
+ * STEP 3 - Kmerfinder to find references and detect contamination
  */
-if (!params.used_external_reference){
-    
-    process KMERFINDER {
-        tag "$samplename"
-        label 'process_low'
+ 
+process KMERFINDER {
+    tag "$samplename"
+    label 'process_low'
 
-        publishDir "${params.outdir}/kmerfinder/${samplename}", mode: params.publish_dir_mode
+    publishDir "${params.outdir}/kmerfinder/${samplename}", mode: params.publish_dir_mode
 
-        input:
-        tuple val(samplename), val(single_end), path(reads) from ch_fastp_kmerfider
-        path(kmerfinderDB) from ch_kmerfinder_db
-        path(kmerfinderTAX) from ch_kmerfinder_taxonomy
+    input:
+    tuple val(samplename), val(single_end), path(reads) from ch_fastp_kmerfider
+    path(kmerfinderDB) from ch_kmerfinder_db
+    path(kmerfinderTAX) from ch_kmerfinder_taxonomy
 
-        output:
-        //path "${samplename}/*.txt" into ch_kmerfinder_results
-        path("${samplename}_results.txt") into ch_kmerfinder_results
+    output:
+    //path "${samplename}/*.txt" into ch_kmerfinder_results
+    path("${samplename}_results.txt") into ch_kmerfinder_results
 
-        script:
-        in_reads = single_end ? "-i ${reads}" : "-i ${reads[0]} ${reads[1]}"
-        """
-        kmerfinder.py \\
-        ${in_reads} -o ${samplename} \\
-        -db  $kmerfinderDB/bacteria.ATG \\
-        -tax $kmerfinderTAX  -x
-        mv ${samplename}/results.txt ${samplename}_results.txt
-        """
-    }
+    script:
+    in_reads = single_end ? "-i ${reads}" : "-i ${reads[0]} ${reads[1]}"
+    """
+    kmerfinder.py \\
+    ${in_reads} -o ${samplename} \\
+    -db  $kmerfinderDB/bacteria.ATG \\
+    -tax $kmerfinderTAX  -x
+    mv ${samplename}/results.txt ${samplename}_results.txt
+    """
 }
 
 /*
