@@ -567,7 +567,7 @@ process FASTP {
 /*
  * STEP 3 - Kmerfinder to find references and detect contamination
  */
- 
+
 process KMERFINDER {
     tag "$samplename"
     label 'process_low'
@@ -587,15 +587,18 @@ process KMERFINDER {
     in_reads = single_end ? "-i ${reads}" : "-i ${reads[0]} ${reads[1]}"
     """
     kmerfinder.py \\
-    ${in_reads} -o ${samplename} \\
+    ${in_reads} \\
+    -o ${samplename} \\
     -db  $kmerfinderDB/bacteria.ATG \\
-    -tax $kmerfinderTAX  -x
+    -tax $kmerfinderTAX \\ 
+    -x 
+
     mv ${samplename}/results.txt ${samplename}_results.txt
     """
 }
 
 /*
- * STEP 4 - Find and download reference from kmerfinder results
+ * STEP 4 - If not provided, download reference from kmerfinder results
  */
 if (!params.used_external_reference) {
     
@@ -624,35 +627,7 @@ if (!params.used_external_reference) {
 }
 
 /*
-process REFERENCE_DOWNLOAD {
-    label 'process_low'
-    publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
-
-    input:
-    file bacteria_file_id from ch_findcomon_download
-    file reference_bacteria_file from ch_reference_ncbi_bacteria
-
-    output:
-    
-    file 'REFERENCES/*_genomic.fna' into ch_reference_fna
-    file 'REFERENCES/*_protein.faa' into ch_reference_protein
-    file 'REFERENCES/*_genomic.gff' into ch_reference_gff
-
-
-    script:
-
-    """
-    ftp_path=\$(grep "\$bacteriaID" $reference_bacteria_file | cut -f20)
-    echo \$ftp_path > path_ftp
-    download_reference.py -url \$ftp_path -out_dir .
-    gunzip *.gz
-    
-    """
-}
-*/
-
-/*
- * STEP 5 - Assembly of reads with the chosen reference
+ * STEP 5 - Assembly of reads with the -chosen or downloaded- reference
  */
 
 process UNICYCLER {
@@ -692,9 +667,8 @@ process QUAST {
     tuple path(reference_fasta), path(reference_gff) from quast_references
 
 	output:
-	path("quast_results") into quast_results
 	path("quast_results/latest/report.tsv") into quast_multiqc
-
+    path("quast_results")
 	script:
 	
     """
@@ -738,7 +712,7 @@ process PROKKA {
 }
 
 /*
- * STEP 3 - Output Description HTML
+ * STEP 6 - Output Description HTML
  */
 process OUTPUT_DOCUMENTATION {
     publishDir "${params.outdir}/pipeline_info", mode: params.publish_dir_mode
@@ -756,7 +730,6 @@ process OUTPUT_DOCUMENTATION {
     markdown_to_html.py $output_docs -o results_description.html
     """
 }
-
 
 /*
  * MultiQC
