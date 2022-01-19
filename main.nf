@@ -110,7 +110,7 @@ if (workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Run Name']         = workflow.runName
 // TODO nf-core: Report custom parameters here
 summary['Input']            = params.input
-if (params.used_external_reference) summary['Reference'] = "External"
+if (params.used_external_reference) summary['Reference'] = "Provided beforehand"
 if (params.used_external_reference) summary['Fasta reference'] = params.reference_fasta
 if (params.used_external_reference) summary['GFF reference'] = params.reference_gff
 if (!params.used_external_reference) summary['Reference'] = "To be downloaded"
@@ -188,6 +188,36 @@ process get_software_versions {
     scrape_software_versions.py &> software_versions_mqc.yaml
     """
 }
+
+if ( params.kmerfinder_bacteria_database_download ) {
+
+    Channel.from(kmerfinder_bacteria_database_download).set { downloaded_kmerfinder_db } 
+
+    process DOWNLOAD_KMERFINDER_DB {
+        label 'error_retry'
+
+        input:
+        path(kmerfinder_database) from downloaded_kmerfinder_db
+
+        output: 
+        path(kmerfinderDB) into ch_kmerfinder_db
+        path(kmerfinderTAX) into ch_kmerfinder_taxonomy
+
+        script:
+        """
+        if 
+        
+        
+        """
+
+
+
+
+    }
+
+
+
+} 
 
 /*
  * PREPROCESSING: check and uncompress references
