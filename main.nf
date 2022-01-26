@@ -652,7 +652,7 @@ if (!params.used_external_reference) {
         mv $kmerfinder_results kmerfinder_resultsdir
 
         find_common_reference.py -d kmerfinder_resultsdir -o references_found.tsv
-        download_reference.py -file references_found.tsv -reference ${reference_bacteria_file} -out_dir .
+        download_reference.py -file references_found.tsv -reference $reference_bacteria_file -out_dir .
         """
     }
 }
@@ -701,6 +701,7 @@ process QUAST {
 	output:
 	path("quast_results/latest/report.tsv") into quast_multiqc
     path("quast_results")
+    
 	script:
 	
     """
