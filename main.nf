@@ -193,7 +193,7 @@ if ( params.kmerfinder_bacteria_database_download ) {
 
     Channel.from(kmerfinder_bacteria_database_download).set { downloaded_kmerfinder_db } 
 
-    process DOWNLOAD_KMERFINDER_DB {
+    process UNCOMPRESS_KMERFINDER_DB {
         label 'error_retry'
 
         input:
@@ -671,7 +671,7 @@ process UNICYCLER {
 
 	output:
 	path(assembly_result) into ch_unicycler_quast
-    tuple val(samplename), val(single_end), path("${samplename}/${samplename}}.fasta") into ch_unicycler_prokka
+    tuple val(samplename), val(single_end), path("${samplename}/${samplename}.fasta") into ch_unicycler_prokka
     
 	script:
     in_reads = single_end ? "-l ${reads}" : "-1 ${reads[0]} -2 ${reads[1]}"
