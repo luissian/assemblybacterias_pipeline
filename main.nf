@@ -33,6 +33,7 @@ if (params.kmerfinder_bacteria_taxonomy) { ch_kmerfinder_taxonomy = file(params.
 if (params.reference_ncbi_bacteria) { ch_reference_ncbi_bacteria = file(params.reference_ncbi_bacteria, checkIfExists: true) } else { exit 1, "Bacteria reference file does not exist" }
 
 
+
 ////////////////////////////////////////////////////
 /* --     Collect configuration parameters     -- */
 ////////////////////////////////////////////////////
@@ -44,6 +45,10 @@ if (params.input) { ch_input = file(params.input, checkIfExists: true) } else { 
 if (params.genomes && params.genome && !params.genomes.containsKey(params.genome)) {
     exit 1, "The provided genome '${params.genome}' is not available in the iGenomes file. Currently the available genomes are ${params.genomes.keySet().join(', ')}"
 }
+// Run parameters
+if (!params.gram) {exit 1, "No gram parameter has been chosen"}
+if (params.reference_fasta && !params.reference_gff) {exit 1, "An external FASTA reference was provided, but no GFF reference"}
+if (params.reference_gff && !params.reference_fasta) {exit 1, "An external GFF reference was provided, but no FASTA reference"}
 
 // TODO nf-core: Add any reference files that are needed
 // Configurable reference genomes
@@ -108,14 +113,12 @@ log.info NfcoreSchema.params_summary_log(workflow, params, json_schema)
 def summary = [:]
 if (workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Run Name']         = workflow.runName
-// TODO nf-core: Report custom parameters here
 summary['Input']            = params.input
-if (params.used_external_reference) summary['Reference'] = "Provided beforehand"
-if (params.used_external_reference) summary['Fasta reference'] = params.reference_fasta
-if (params.used_external_reference) summary['GFF reference'] = params.reference_gff
-if (!params.used_external_reference) summary['Reference'] = "To be downloaded"
+if (params.reference_fasta) summary['Reference'] = "Provided beforehand"
+if (params.external_reference) summary['Fasta reference'] = params.reference_fasta
+if (params.external_reference) summary['GFF reference'] = params.reference_gff
+if (!params.reference_fasta) summary['Reference'] = "To be downloaded"
 summary['Gram']             = params.gram
-//summary['Data Type']        = params.single_end ? 'Single-End' : 'Paired-End'
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
 if (workflow.containerEngine) summary['Container'] = "$workflow.containerEngine - $workflow.container"
 summary['Output dir']       = params.outdir
@@ -189,30 +192,25 @@ process get_software_versions {
     """
 }
 
-if ( params.kmerfinder_bacteria_database_download ) {
+if ( params.kmerfinder_bacteria_database.endswith('.gz') || params.kmerfinder_bacteria_database.endswith('.tar')) {
 
-    Channel.from(kmerfinder_bacteria_database_download).set { downloaded_kmerfinder_db } 
+    Channel.from(kmerfinder_bacteria_database).set { kmerfinder_db_uncompress } 
 
     process UNCOMPRESS_KMERFINDER_DB {
         label 'error_retry'
 
         input:
-        path(kmerfinder_database) from downloaded_kmerfinder_db
+        path(kmerfinder_compressed_database) from kmerfinder_db_uncompress
 
         output: 
         path(kmerfinderDB) into ch_kmerfinder_db
-        path(kmerfinderTAX) into ch_kmerfinder_taxonomy
 
         script:
+        kmerfinderDB = kmerfinder_compressed_database.toString() - ".gz" - ".tar"
         """
-        if 
-        
-        
+        mkdir $kmerfinderDB
+        tar -xf ${kmerfinder_compressed_database} -C ${kmerfinderDB} --strip-components 1
         """
-
-
-
-
     }
 
 
@@ -223,7 +221,7 @@ if ( params.kmerfinder_bacteria_database_download ) {
  * PREPROCESSING: check and uncompress references
  */
 
-if ( params.used_external_reference ) {
+if ( params.external_reference ) {
 
     if (params.reference_fasta){
         file(params.reference_fasta, checkIfExists: true)
@@ -631,7 +629,7 @@ process KMERFINDER {
 /*
  * STEP 4 - If not provided, download reference from kmerfinder results
  */
-if (!params.used_external_reference) {
+if (!params.reference_fasta && !params.reference_gff) {
     
     process FIND_DOWNLOAD_COMMON_REFERENCE {
 
