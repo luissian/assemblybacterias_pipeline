@@ -67,8 +67,10 @@ def download_references (file, reference, out_dir):
     # extract the most common reference from file
     with open(file) as infile:
         infile = infile.readlines()
-        infile = [item.replace("\n","").split("\t") for item in infile]
+        infile = [item.replace("\n","").split("\t") for item in infile if not item.startswith("#")]
         top_reference = infile[0][0]
+
+    print(top_reference)
 
     # create the outdir (do nothing if already there)
     try:
@@ -79,12 +81,15 @@ def download_references (file, reference, out_dir):
     # open the reference and find the reference
     with open(reference) as infile:
         infile = infile.readlines()
-        infile = [item.replace("\n","").split("\t") for item in infile]
-        infile = [row for row in infile if row[0] in top_reference]
+        infile = [item.replace("\n","").split("\t") for item in infile if not item.startswith("#")]
+
+        url = [row[19] for row in infile if row[0] in top_reference]
     
+        url = str(url[0])
 
     # get url and reference file
-    url = infile[0][19]  
+
+
 
     for r_end in reference_ends:
         
