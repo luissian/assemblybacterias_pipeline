@@ -29,10 +29,7 @@ if (params.validate_params) {
 }
 
 if (params.kmerfinder_bacteria_database) { ch_kmerfinder_db = file(params.kmerfinder_bacteria_database, checkIfExists: true) } else { exit 1, "Kmerfinder database file does not exist" }
-if (params.kmerfinder_bacteria_taxonomy) { ch_kmerfinder_taxonomy = file(params.kmerfinder_bacteria_taxonomy, checkIfExists: true) } else { exit 1, "Kmerfinder taxonmy file does not exist" }
 if (params.reference_ncbi_bacteria) { ch_reference_ncbi_bacteria = file(params.reference_ncbi_bacteria, checkIfExists: true) } else { exit 1, "Bacteria reference file does not exist" }
-
-
 
 ////////////////////////////////////////////////////
 /* --     Collect configuration parameters     -- */
@@ -49,6 +46,7 @@ if (params.genomes && params.genome && !params.genomes.containsKey(params.genome
 if (!params.gram) {exit 1, "No gram parameter has been chosen"}
 if (params.reference_fasta && !params.reference_gff) {exit 1, "An external FASTA reference was provided, but no GFF reference"}
 if (params.reference_gff && !params.reference_fasta) {exit 1, "An external GFF reference was provided, but no FASTA reference"}
+if (!params.kmerfinder_bacteria_database) {exit 1, "No kmerfinder database was provided"}
 
 // TODO nf-core: Add any reference files that are needed
 // Configurable reference genomes
@@ -115,8 +113,8 @@ if (workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Run Name']         = workflow.runName
 summary['Input']            = params.input
 if (params.reference_fasta) summary['Reference'] = "Provided beforehand"
-if (params.external_reference) summary['Fasta reference'] = params.reference_fasta
-if (params.external_reference) summary['GFF reference'] = params.reference_gff
+if (params.reference_fasta) summary['Fasta reference'] = params.reference_fasta
+if (params.reference_gff) summary['GFF reference'] = params.reference_gff
 if (!params.reference_fasta) summary['Reference'] = "To be downloaded"
 summary['Gram']             = params.gram
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
@@ -192,7 +190,7 @@ process get_software_versions {
     """
 }
 
-if ( params.kmerfinder_bacteria_database.endswith('.gz') || params.kmerfinder_bacteria_database.endswith('.tar')) {
+if ( params.kmerfinder_bacteria_database.endsWith('.gz') || params.kmerfinder_bacteria_database.endsWith('.tar')) {
 
     Channel.from(kmerfinder_bacteria_database).set { kmerfinder_db_uncompress } 
 
@@ -213,15 +211,13 @@ if ( params.kmerfinder_bacteria_database.endswith('.gz') || params.kmerfinder_ba
         """
     }
 
-
-
 } 
 
 /*
  * PREPROCESSING: check and uncompress references
  */
 
-if ( params.external_reference ) {
+if ( params.reference_fasta ) {
 
     if (params.reference_fasta){
         file(params.reference_fasta, checkIfExists: true)
@@ -604,22 +600,21 @@ process KMERFINDER {
     input:
     tuple val(samplename), val(single_end), path(reads) from ch_fastp_kmerfider
     path(kmerfinderDB) from ch_kmerfinder_db
-    path(kmerfinderTAX) from ch_kmerfinder_taxonomy
 
     output:
     //path "${samplename}/*.txt" into ch_kmerfinder_results
     path(kmerfinder_result) into ch_kmerfinder_results
 
     script:
-    in_reads = single_end ? "-i ${reads}" : "-i ${reads[0]} ${reads[1]}"
+    in_reads = single_end ? "${reads}" : "${reads[0]} ${reads[1]}"
     kmerfinder_result = "${samplename}_results.txt"
 
     """
     kmerfinder.py \\
-    $in_reads \\
-    -o $samplename \\
-    -db  $kmerfinderDB/bacteria.ATG \\
-    -tax $kmerfinderTAX \\ 
+    --infile $in_reads \\
+    --output_folder $samplename \\
+    --db_path $kmerfinderDB/bacteria.ATG \\
+    -tax $kmerfinderDB/bacteria.name \\
     -x 
 
     mv ${samplename}/results.txt $kmerfinder_result
@@ -641,7 +636,7 @@ if (!params.reference_fasta && !params.reference_gff) {
         file(reference_bacteria_file) from ch_reference_ncbi_bacteria
 
         output:
-        tuple path("*_genomic.fna"), path("*_genomic.gff") into quast_references
+        tuple path("*_genomic.fna.gz"), path("*_genomic.gff.gz") into quast_references
         path("references_found.tsv")
 
         script:
@@ -656,7 +651,7 @@ if (!params.reference_fasta && !params.reference_gff) {
 }
 
 /*
- * STEP 5 - Assembly of reads with the -chosen or downloaded- reference
+ * STEP 5 - Assembly of reads and check with the -chosen or downloaded- reference
  */
 
 process UNICYCLER {
@@ -673,7 +668,7 @@ process UNICYCLER {
     
 	script:
     in_reads = single_end ? "-l ${reads}" : "-1 ${reads[0]} -2 ${reads[1]}"
-    assemlby_result = "${samplename}/${samplename}.fasta"
+    assembly_result = "${samplename}/${samplename}.fasta"
 
 	"""
 	unicycler \\
@@ -771,9 +766,7 @@ process MULTIQC {
 
     input:
     path(multiqc_config) from ch_multiqc_config
-    path(mqc_custom_config) from ch_multiqc_custom_config.collect().ifEmpty([])
-    // TODO nf-core: Add in log files from your new processes for MultiQC to find!
-    
+    path(mqc_custom_config) from ch_multiqc_custom_config.collect().ifEmpty([])   
     path('fastqc/*') from ch_fastqc_results.collect().ifEmpty([])
     path('software_versions/*') from ch_software_versions_yaml.collect()
     path(workflow_summary) from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
@@ -784,14 +777,8 @@ process MULTIQC {
     path("multiqc_plots")
 
     script:
-    if (!(workflow.runName ==~ /[a-z]+_[a-z]+/)) {
-        rtitle = "--title \"${workflow.runName}\""
-        rfilename = "--filename " + workflow.runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report"
-    }
-    custom_config_file = params.multiqc_config ? "--config $mqc_custom_config" : ''
-    
     """
-    multiqc -f $rtitle $rfilename $custom_config_file .
+    multiqc .
     """
 }
 /*
