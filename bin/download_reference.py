@@ -18,13 +18,20 @@ INPUT:
     -OUTDIR: name of the output dir
 
 OUTPUT:
-OPTIONS:
+    - *_fna.gz: file with the top-reference genome
+    - *_gff.gz: file with the top-reference gff
+    - *_protein.gz: file with the top-reference proteins
+
 USAGE:
     python download_reference.py -file [FILE] -reference [REFERENCE] -out_dir [OUTDIR]
+
 REQUIREMENTS:
     -Python >= 3.6
-DISCLAIMER:
-TO DO: 
+    -Python wget
+
+DISCLAIMER: This script has been designed for the assembly pipeline of BU-ISCIII.
+            Feel free to use it at will, however we dont guarantee its success
+            outside its purpose.
 ================================================================
 END_OF_HEADER
 ================================================================
