@@ -621,6 +621,27 @@ process KMERFINDER {
     """
 }
 
+process CHECK_CONTAMINATION {
+    
+    label 'process_low'
+    publishDir "${params.outdir}/99-stats", mode: params.publish_dir_mode
+
+    input:
+    path(kmerfinder_results) from ch_kmerfinder_results
+    
+    output:
+    file("kmerfinder.csv")
+
+    script:
+    """
+    parse_kmerfinder.py --path --output_bn kmerfinder.bn --output_csv kmerfinder.csv
+
+    python3 ../bacterial_qc/parse_kmerfinder.py --path . --output_bn kmerfinder.bn --output_csv kmerfinder.csv
+
+    """
+
+}
+
 /*
  * STEP 4 - If not provided, download reference from kmerfinder results
  */
