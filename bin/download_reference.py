@@ -10,6 +10,9 @@ VERSION: 0.1
 CREATED: Early 2022
 REVISED: 18-2-2022
 DESCRIPTION: 
+    Given a file with the kmerfinder results and frequencies (probably created by
+    find_common_reference.py), and the NCBI assembly sheet, download the top-reference
+    genome, gff and protein files from the NCBI ftp. 
 
 INPUT:
     -FILE: file containing the ranking of references from kmerfinder.
