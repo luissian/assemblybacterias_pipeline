@@ -604,6 +604,7 @@ process KMERFINDER {
     output:
     //path "${samplename}/*.txt" into ch_kmerfinder_results
     path(kmerfinder_result) into ch_kmerfinder_results
+    path($samplename) into_ch_kmerfinder_results_bydir
 
     script:
     in_reads = single_end ? "${reads}" : "${reads[0]} ${reads[1]}"
@@ -617,7 +618,7 @@ process KMERFINDER {
     -tax $kmerfinderDB/bacteria.name \\
     -x 
 
-    mv ${samplename}/results.txt $kmerfinder_result
+    ln -s ${samplename}/results.txt $kmerfinder_result
     """
 }
 
@@ -627,19 +628,16 @@ process CHECK_CONTAMINATION {
     publishDir "${params.outdir}/99-stats", mode: params.publish_dir_mode
 
     input:
-    path(kmerfinder_results) from ch_kmerfinder_results
+    path(kmerfinder_dir) from ch_kmerfinder_results_bydir.collect()
     
     output:
     file("kmerfinder.csv")
 
     script:
     """
-    parse_kmerfinder.py --path --output_bn kmerfinder.bn --output_csv kmerfinder.csv
-
-    python3 ../bacterial_qc/parse_kmerfinder.py --path . --output_bn kmerfinder.bn --output_csv kmerfinder.csv
+    parse_kmerfinder.py --path . --output_bn kmerfinder.bn --output_csv kmerfinder.csv
 
     """
-
 }
 
 /*
@@ -653,7 +651,7 @@ if (!params.reference_fasta && !params.reference_gff) {
         publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
 
         input:
-        path(kmerfinder_results) from ch_kmerfinder_results.collect().ifEmpty([])
+        path(kmerfinder_results) from ch_kmerfinder_results.collect()
         file(reference_bacteria_file) from ch_reference_ncbi_bacteria
 
         output:
