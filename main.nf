@@ -746,10 +746,10 @@ process PROKKA {
     --outdir prokka_results \\
     --prefix $samplename \\
     --addgenes \\
-    --kingdom Bacteria \\ 
+    --kingdom Bacteria \\
     --usegenus \\
-    --gram $params.gram \\ 
-    --locustag $samplename \\ 
+    --gram $params.gram \\
+    --locustag $samplename \\
     --centre CNM \\
     --compliant \\
     ${scaffold}
