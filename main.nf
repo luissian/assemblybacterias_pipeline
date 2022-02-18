@@ -602,23 +602,23 @@ process KMERFINDER {
     path(kmerfinderDB) from ch_kmerfinder_db
 
     output:
-    //path "${samplename}/*.txt" into ch_kmerfinder_results
     path(kmerfinder_result) into ch_kmerfinder_results
-    path($samplename) into_ch_kmerfinder_results_bydir
+    path(samplename_dir) into ch_kmerfinder_results_bydir
 
     script:
+    samplename_dir = "${samplename}"
     in_reads = single_end ? "${reads}" : "${reads[0]} ${reads[1]}"
     kmerfinder_result = "${samplename}_results.txt"
 
     """
     kmerfinder.py \\
     --infile $in_reads \\
-    --output_folder $samplename \\
+    --output_folder $samplename_dir \\
     --db_path $kmerfinderDB/bacteria.ATG \\
     -tax $kmerfinderDB/bacteria.name \\
     -x 
 
-    ln -s ${samplename}/results.txt $kmerfinder_result
+    ln -s ${samplename_dir}/results.txt $kmerfinder_result
     """
 }
 
