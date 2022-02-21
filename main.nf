@@ -28,14 +28,9 @@ if (params.validate_params) {
     NfcoreSchema.validateParameters(params, json_schema, log)
 }
 
-//if (params.bacteria_database) { ch_kmerfinder_db = file(params.bacteria_database, checkIfExists: true)} else { exit 1, "kmerfinder Database file not specified!" }
-//ch_kmerfinder_db = Channel.fromPath(params.bacteria_database, type:'dir')
-ch_kmerfinder_db = file(params.bacteria_database)
+if (params.kmerfinder_bacteria_database) { ch_kmerfinder_db = file(params.kmerfinder_bacteria_database, checkIfExists: true) } else { exit 1, "Kmerfinder database file does not exist" }
+if (params.reference_ncbi_bacteria) { ch_reference_ncbi_bacteria = file(params.reference_ncbi_bacteria, checkIfExists: true) } else { exit 1, "Bacteria reference file does not exist" }
 
-if (params.bacteria_taxonomy) { ch_kmerfinder_taxonomy = file(params.bacteria_taxonomy, checkIfExists: true) } else { exit 1, "Kmerfinder taxonmy file does not exist" }
-
-
-if (params.reference_ncbi_bacteria) {ch_reference_ncbi_bacteria = file(params.reference_ncbi_bacteria, checkIfExists: true)} else {exit 1, "Bacteria reference file does not exist"}
 ////////////////////////////////////////////////////
 /* --     Collect configuration parameters     -- */
 ////////////////////////////////////////////////////
@@ -47,6 +42,11 @@ if (params.input) { ch_input = file(params.input, checkIfExists: true) } else { 
 if (params.genomes && params.genome && !params.genomes.containsKey(params.genome)) {
     exit 1, "The provided genome '${params.genome}' is not available in the iGenomes file. Currently the available genomes are ${params.genomes.keySet().join(', ')}"
 }
+// Run parameters
+if (!params.gram) {exit 1, "No gram parameter has been chosen"}
+if (params.reference_fasta && !params.reference_gff) {exit 1, "An external FASTA reference was provided, but no GFF reference"}
+if (params.reference_gff && !params.reference_fasta) {exit 1, "An external GFF reference was provided, but no FASTA reference"}
+if (!params.kmerfinder_bacteria_database) {exit 1, "No kmerfinder database was provided"}
 
 // TODO nf-core: Add any reference files that are needed
 // Configurable reference genomes
@@ -80,18 +80,18 @@ ch_output_docs_images = file("$projectDir/docs/images/", checkIfExists: true)
  * Create a channel for input read files
  */
 /*
-if (params.input_paths) {
+if (params.input) {
     if (params.single_end) {
         Channel
-            .from(params.input_paths)
+            .from(params.input)
             .map { row -> [ row[0], [ file(row[1][0], checkIfExists: true) ] ] }
-            .ifEmpty { exit 1, 'params.input_paths was empty - no input files supplied' }
+            .ifEmpty { exit 1, 'params.input was empty - no input files supplied' }
             .into { ch_read_files_fastp; ch_read_files_fastqc;  ch_read_files_trimming }
     } else {
         Channel
-            .from(params.input_paths)
+            .from(params.input)
             .map { row -> [ row[0], [ file(row[1][0], checkIfExists: true), file(row[1][1], checkIfExists: true) ] ] }
-            .ifEmpty { exit 1, 'params.input_paths was empty - no input files supplied' }
+            .ifEmpty { exit 1, 'params.input was empty - no input files supplied' }
             .into { ch_read_files_fastp; ch_read_files_fastqc;  ch_read_files_trimming }
     }
 } else {
@@ -102,11 +102,8 @@ if (params.input_paths) {
 }
 */
 
-
-
-
 ////////////////////////////////////////////////////
-/* --         PRINT PARAMETER SUMMARY          -- */
+/* --               PARAMETER SUMMARY          -- */
 ////////////////////////////////////////////////////
 log.info NfcoreSchema.params_summary_log(workflow, params, json_schema)
 
@@ -114,11 +111,12 @@ log.info NfcoreSchema.params_summary_log(workflow, params, json_schema)
 def summary = [:]
 if (workflow.revision) summary['Pipeline Release'] = workflow.revision
 summary['Run Name']         = workflow.runName
-// TODO nf-core: Report custom parameters here
 summary['Input']            = params.input
-summary['Fasta Ref']        = params.fasta
-if (params.gff)                        summary['GFF'] = params.gff
-//summary['Data Type']        = params.single_end ? 'Single-End' : 'Paired-End'
+if (params.reference_fasta) summary['Reference'] = "Provided beforehand"
+if (params.reference_fasta) summary['Fasta reference'] = params.reference_fasta
+if (params.reference_gff) summary['GFF reference'] = params.reference_gff
+if (!params.reference_fasta) summary['Reference'] = "To be downloaded"
+summary['Gram']             = params.gram
 summary['Max Resources']    = "$params.max_memory memory, $params.max_cpus cpus, $params.max_time time per job"
 if (workflow.containerEngine) summary['Container'] = "$workflow.containerEngine - $workflow.container"
 summary['Output dir']       = params.outdir
@@ -136,6 +134,7 @@ if (params.config_profile_description) summary['Config Profile Description'] = p
 if (params.config_profile_contact)     summary['Config Profile Contact']     = params.config_profile_contact
 if (params.config_profile_url)         summary['Config Profile URL']         = params.config_profile_url
 summary['Config Files'] = workflow.configFiles.join(', ')
+
 if (params.email || params.email_on_fail) {
     summary['E-mail Address']    = params.email
     summary['E-mail on failure'] = params.email_on_fail
@@ -177,85 +176,110 @@ process get_software_versions {
 
     script:
     // TODO nf-core: Get all tools to print their version number here
+    //     kmerfinder > v_kmerfinder.txt
+    //     quast > v_quast.txt
+    //     prokka > v_prokka.txt
     """
     echo $workflow.manifest.version > v_pipeline.txt
     echo $workflow.nextflow.version > v_nextflow.txt
     fastqc --version > v_fastqc.txt
     multiqc --version > v_multiqc.txt
     fastp --version > v_fastp.txt
+
     scrape_software_versions.py &> software_versions_mqc.yaml
     """
 }
 
-/*
- * PREPROCESSING: if specie genome fasta is provided check and uncompress genome fasta file if needed
- */
-if (params.fasta){
-    if (params.fasta.endsWith('.gz')) {
-        process GUNZIP_FASTA {
-            label 'error_retry'
-            if (params.save_reference) {
-                publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
-            }
+if ( params.kmerfinder_bacteria_database.endsWith('.gz') || params.kmerfinder_bacteria_database.endsWith('.tar')) {
 
-            input:
-            path fasta from params.fasta
+    Channel.from(kmerfinder_bacteria_database).set { kmerfinder_db_uncompress } 
 
-            output:
-            path "$unzip" into ch_fasta
+    process UNCOMPRESS_KMERFINDER_DB {
+        label 'error_retry'
 
-            script:
-            unzip = fasta.toString() - '.gz'
-            """
-            pigz -f -d -p $task.cpus $fasta
-            """
-        }
-    } else {
-        ch_fasta = file(params.fasta)
+        input:
+        path(kmerfinder_compressed_database) from kmerfinder_db_uncompress
+
+        output: 
+        path(kmerfinderDB) into ch_kmerfinder_db
+
+        script:
+        kmerfinderDB = kmerfinder_compressed_database.toString() - ".gz" - ".tar"
+        """
+        mkdir $kmerfinderDB
+        tar -xf ${kmerfinder_compressed_database} -C ${kmerfinderDB} --strip-components 1
+        """
     }
-} else {
-    //See: https://nextflow-io.github.io/patterns/index.html#_optional_input
-    ch_fasta = file('NO_FILE')
-}
+
+} 
 
 /*
- * PREPROCESSING: Uncompress gff annotation file
+ * PREPROCESSING: check and uncompress references
  */
-if (params.gff) {
-    file(params.gff, checkIfExists: true)
-    if (params.gff.endsWith('.gz')) {
-        process GUNZIP_GFF {
-            label 'error_retry'
-            if (params.save_reference) {
-                publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+
+if ( params.reference_fasta ) {
+
+    if (params.reference_fasta){
+        file(params.reference_fasta, checkIfExists: true)
+        if (params.reference_fasta.endsWith('.gz')) {
+
+            process GUNZIP_FASTA {
+                label 'error_retry'
+                if (params.save_reference) {
+                    publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+                }
+
+                input:
+                path(fasta) from params.fasta
+
+                output:
+                path(unzip) into fasta_reference
+
+                script:
+                unzip = fasta.toString() - '.gz'
+                """
+                pigz -f -d -p $task.cpus $fasta
+                """
             }
-
-            input:
-            path gff from params.gff
-
-            output:
-            path "$unzip" into ch_gff
-
-            script:
-            unzip = gff.toString() - '.gz'
-            """
-            pigz -f -d -p $task.cpus $gff
-            """
+        } else {
+            Channel.fromPath(params.reference_fasta).set { fasta_reference }
         }
-    } else {
-        ch_gff = file(params.gff)
     }
-} else {
-    //See: https://nextflow-io.github.io/patterns/index.html#_optional_input
-    ch_gff = file('NO_FILE')
+
+    if (params.reference_gff) {
+        file(params.reference_gff, checkIfExists: true)
+        if (params.reference_gff.endsWith('.gz')) {
+            
+            process GUNZIP_GFF {
+                label 'error_retry'
+                if (params.save_reference) {
+                    publishDir "${params.outdir}/genome", mode: params.publish_dir_mode
+                }
+
+                input:
+                path(gff) from params.gff
+
+                output:
+                path(unzip) into gff_reference
+
+                script:
+                unzip = gff.toString() - '.gz'
+                """
+                pigz -f -d -p $task.cpus $gff
+                """
+            }
+        } else {
+            Channel.fromPath(params.reference_gff).set { gff_reference }
+        }
+    }
+
+    fasta_reference.combine(gff_reference).set { quast_references }
 }
 
-///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 /* --                                                                     -- */
 /* --                     PARSE DESIGN FILE                               -- */
 /* --                                                                     -- */
-///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -270,7 +294,7 @@ process CHECK_SAMPLESHEET {
                 }
 
     input:
-    path samplesheet from ch_input
+    path(samplesheet) from ch_input
 
     output:
     path "samplesheet.valid.csv" into ch_samplesheet_reformat
@@ -349,7 +373,7 @@ if (!params.skip_sra || !isOffline()) {
                 ch_reads_sra_dump }
 
     process SRA_FASTQ_FTP {
-        tag "$sample"
+        tag "$samplename"
         label 'process_medium'
         label 'error_retry'
         publishDir "${params.outdir}/preprocess/sra", mode: params.publish_dir_mode,
@@ -362,33 +386,33 @@ if (!params.skip_sra || !isOffline()) {
         is_ftp
 
         input:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), val(fastq), val(md5) from ch_reads_sra_ftp
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp), val(fastq), val(md5) from ch_reads_sra_ftp
 
         output:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_ftp
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_ftp
         path "*.md5"
 
         script:
         if (single_end) {
             """
-            curl -L ${fastq[0]} -o ${sample}.fastq.gz
-            echo "${md5[0]}  ${sample}.fastq.gz" > ${sample}.fastq.gz.md5
-            md5sum -c ${sample}.fastq.gz.md5
+            curl -L ${fastq[0]} -o ${samplename}.fastq.gz
+            echo "${md5[0]}  ${samplename}.fastq.gz" > ${samplename}.fastq.gz.md5
+            md5sum -c ${samplename}.fastq.gz.md5
             """
         } else {
             """
-            curl -L ${fastq[0]} -o ${sample}_1.fastq.gz
-            echo "${md5[0]}  ${sample}_1.fastq.gz" > ${sample}_1.fastq.gz.md5
-            md5sum -c ${sample}_1.fastq.gz.md5
-            curl -L ${fastq[1]} -o ${sample}_2.fastq.gz
-            echo "${md5[1]}  ${sample}_2.fastq.gz" > ${sample}_2.fastq.gz.md5
-            md5sum -c ${sample}_2.fastq.gz.md5
+            curl -L ${fastq[0]} -o ${samplename}_1.fastq.gz
+            echo "${md5[0]}  ${samplename}_1.fastq.gz" > ${samplename}_1.fastq.gz.md5
+            md5sum -c ${samplename}_1.fastq.gz.md5
+            curl -L ${fastq[1]} -o ${samplename}_2.fastq.gz
+            echo "${md5[1]}  ${samplename}_2.fastq.gz" > ${samplename}_2.fastq.gz.md5
+            md5sum -c ${samplename}_2.fastq.gz.md5
             """
         }
     }
 
     process SRA_FASTQ_DUMP {
-        tag "$sample"
+        tag "$samplename"
         label 'process_medium'
         label 'error_retry'
         publishDir "${params.outdir}/preprocess/sra", mode: params.publish_dir_mode,
@@ -401,14 +425,14 @@ if (!params.skip_sra || !isOffline()) {
         !is_ftp
 
         input:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp) from ch_reads_sra_dump.map { it[0..3] }
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp) from ch_reads_sra_dump.map { it[0..3] }
 
         output:
-        tuple val(sample), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_dump
+        tuple val(samplename), val(single_end), val(is_sra), val(is_ftp), path("*.fastq.gz") into ch_sra_fastq_dump
         path "*.log"
 
         script:
-        prefix = "${sample.split('_')[0..-2].join('_')}"
+        prefix = "${samplename.split('_')[0..-2].join('_')}"
         pe = single_end ? "" : "--readids --split-e"
         rm_orphan = single_end ? "" : "[ -f  ${prefix}.fastq.gz ] && rm ${prefix}.fastq.gz"
         """
@@ -445,16 +469,16 @@ ch_reads_all
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * STEP 2: Merge FastQ files with the same sample identifier
+ * Merge FastQ files with the same sample identifier
  */
 process CAT_FASTQ {
-    tag "$sample"
+    tag "$samplename"
 
     input:
-    tuple val(sample), val(single_end), path(reads) from ch_reads_all
+    tuple val(samplename), val(single_end), path(reads) from ch_reads_all
 
     output:
-    tuple val(sample), val(single_end), path("*.merged.fastq.gz") into ch_cat_fastqc,
+    tuple val(samplename), val(single_end), path("*.merged.fastq.gz") into ch_cat_fastqc,
                                                                        ch_cat_fastp
 
     script:
@@ -465,33 +489,33 @@ process CAT_FASTQ {
             def read2 = []
             readList.eachWithIndex{ v, ix -> ( ix & 1 ? read2 : read1 ) << v }
             """
-            cat ${read1.sort().join(' ')} > ${sample}_1.merged.fastq.gz
-            cat ${read2.sort().join(' ')} > ${sample}_2.merged.fastq.gz
+            cat ${read1.sort().join(' ')} > ${samplename}_1.merged.fastq.gz
+            cat ${read2.sort().join(' ')} > ${samplename}_2.merged.fastq.gz
             """
         } else {
             """
-            ln -s ${reads[0]} ${sample}_1.merged.fastq.gz
-            ln -s ${reads[1]} ${sample}_2.merged.fastq.gz
+            ln -s ${reads[0]} ${samplename}_1.merged.fastq.gz
+            ln -s ${reads[1]} ${samplename}_2.merged.fastq.gz
             """
         }
     } else {
         if (readList.size > 1) {
             """
-            cat ${readList.sort().join(' ')} > ${sample}.merged.fastq.gz
+            cat ${readList.sort().join(' ')} > ${samplename}.merged.fastq.gz
             """
         } else {
             """
-            ln -s $reads ${sample}.merged.fastq.gz
+            ln -s $reads ${samplename}.merged.fastq.gz
             """
         }
     }
 }
 
 /*
- * STEP 3 - FastQC
+ * STEP 1 - FastQC
  */
 
-process fastqc {
+process FASTQC {
     tag "$name"
     label 'process_low'
     publishDir "${params.outdir}/fastqc", mode: params.publish_dir_mode,
@@ -503,7 +527,7 @@ process fastqc {
     tuple val(name), val(single_end), path(reads) from ch_cat_fastqc
 
     output:
-    file '*_fastqc.{zip,html}' into ch_fastqc_results
+    path('*_fastqc.{zip,html}') into ch_fastqc_results
 
     script:
     """
@@ -511,13 +535,12 @@ process fastqc {
     """
 }
 
-
 /*
- * STEP 4: Fastp adapter trimming and quality filtering
+ * STEP 2: Fastp adapter and quality filtering
  */
 
 process FASTP {
-        tag "$sample"
+        tag "$samplename"
         label 'process_low'
         publishDir "${params.outdir}/preprocess/fastp", mode: params.publish_dir_mode,
             saveAs: { filename ->
@@ -529,34 +552,25 @@ process FASTP {
                         else params.save_trimmed ? filename : null
                     }
         input:
-        tuple val(sample), val(single_end), path(reads) from ch_cat_fastp
+        tuple val(samplename), val(single_end), path(reads) from ch_cat_fastp
 
         output:
-        tuple val(sample), val(single_end), path("*.trim.fastq.gz") into ch_fastp_kmerfider,
+        tuple val(samplename), val(single_end), path("*.trim.fastq.gz") into ch_fastp_kmerfider,
                                                                     ch_fastp_unicycler
-        path "*.json" into ch_fastp_mqc
+        path("*.json") into ch_fastp_mqc
         //path "*_fastqc.{zip,html}" into ch_fastp_fastqc_mqc
-        path "*.{log,fastp.html}"
-        path "*.fail.fastq.gz"
+        path("*.{log,fastp.html}")
+        path("*.fail.fastq.gz")
 
         script:
-        // Added soft-links to original fastqs for consistent naming in MultiQC
+        in_reads = single_end ? "--in1 ${reads}" : "--in1 ${reads[0]} --in2 ${reads[1]}"
+        out_reads = single_end ? "--out1 ${samplename}.trim.fastq.gz --failed_out ${samplename}.fail.fastq.gz" : "--out1 ${samplename}_1.trim.fastq.gz --out2 ${samplename}_2.trim.fastq.gz --unpaired1 ${samplename}_1.fail.fastq.gz --unpaired2 ${samplename}_2.fail.fastq.gz"
         autodetect = single_end ? "" : "--detect_adapter_for_pe"
+        
         """
-        IN_READS='--in1 ${sample}.fastq.gz'
-        OUT_READS='--out1 ${sample}.trim.fastq.gz --failed_out ${sample}.fail.fastq.gz'
-        if $single_end; then
-            [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
-        else
-            [ ! -f  ${sample}_1.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.fastq.gz
-            [ ! -f  ${sample}_2.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.fastq.gz
-            IN_READS='--in1 ${sample}_1.fastq.gz --in2 ${sample}_2.fastq.gz'
-            OUT_READS='--out1 ${sample}_1.trim.fastq.gz --out2 ${sample}_2.trim.fastq.gz --unpaired1 ${sample}_1.fail.fastq.gz --unpaired2 ${sample}_2.fail.fastq.gz'
-        fi
-
         fastp \\
-            \$IN_READS \\
-            \$OUT_READS \\
+            $in_reads \\
+            $out_reads \\
             $autodetect \\
             --cut_front \\
             --cut_tail \\
@@ -566,147 +580,192 @@ process FASTP {
             --length_required $params.min_trim_length \\
             --trim_poly_x \\
             --thread $task.cpus \\
-            --json ${sample}.fastp.json \\
-            --html ${sample}.fastp.html \\
-            2> ${sample}.fastp.log
+            --json ${samplename}.fastp.json \\
+            --html ${samplename}.fastp.html \\
+            2> ${samplename}.fastp.log
 
         """
 }
 
-
-
 /*
- * STEP 3 - Kmerfinder
+ * STEP 3 - Kmerfinder to find references and detect contamination
  */
-if (params.used_external_reference == false ){
-    process kmerfinder {
-        tag "$sample"
-        label 'process_low'
 
-        publishDir "${params.outdir}/kmerfinder/${sample}", mode: params.publish_dir_mode
+process KMERFINDER {
+    tag "$samplename"
+    label 'process_low'
 
-        input:
-        tuple val(sample), val(single_end), path(reads) from ch_fastp_kmerfider
-        file kmerfinderDB from ch_kmerfinder_db
-        file kmerfinderTAX from ch_kmerfinder_taxonomy
+    publishDir "${params.outdir}/kmerfinder/${samplename}", mode: params.publish_dir_mode
 
-        output:
-        //path "${sample}/*.txt" into ch_kmerfinder_results
-        path "${sample}_results.txt" into ch_kmerfinder_results
+    input:
+    tuple val(samplename), val(single_end), path(reads) from ch_fastp_kmerfider
+    path(kmerfinderDB) from ch_kmerfinder_db
 
-        script:
-        """
-        IN_READS='-i ${sample}.trim.fastq.gz'
-        if $single_end; then
-            [ ! -f  ${sample}.fastq.gz ] && ln -s $reads ${sample}.fastq.gz
-        else
-            [ ! -f  ${sample}_1.trim.fastq.gz ] && ln -s ${reads[0]} ${sample}_1.trim.fastq.gz
-            [ ! -f  ${sample}_2.trim.fastq.gz ] && ln -s ${reads[1]} ${sample}_2.trim.fastq.gz
-            IN_READS='-i ${sample}_1.trim.fastq.gz  ${sample}_2.trim.fastq.gz'
-        fi
+    output:
+    path(kmerfinder_result) into ch_kmerfinder_results
+    path(samplename_dir) into ch_kmerfinder_results_bydir
 
-        kmerfinder.py \\
-        \$IN_READS -o ${sample} \\
-        -db  $kmerfinderDB/bacteria.ATG \\
-        -tax $kmerfinderTAX  -x
-        mv ${sample}/results.txt ${sample}_results.txt
-        """
-    }
+    script:
+    samplename_dir = "${samplename}"
+    in_reads = single_end ? "${reads}" : "${reads[0]} ${reads[1]}"
+    kmerfinder_result = "${samplename}_results.txt"
+
+    """
+    kmerfinder.py \\
+    --infile $in_reads \\
+    --output_folder $samplename_dir \\
+    --db_path $kmerfinderDB/bacteria.ATG \\
+    -tax $kmerfinderDB/bacteria.name \\
+    -x 
+
+    ln -s ${samplename_dir}/results.txt $kmerfinder_result
+    """
+}
+
+process CHECK_CONTAMINATION {
+    
+    label 'process_low'
+    publishDir "${params.outdir}/99-stats", mode: params.publish_dir_mode
+
+    input:
+    path(kmerfinder_dir) from ch_kmerfinder_results_bydir.collect()
+    
+    output:
+    file("kmerfinder.csv")
+
+    script:
+    """
+    parse_kmerfinder.py --path . --output_bn kmerfinder.bn --output_csv kmerfinder.csv
+
+    """
 }
 
 /*
- * STEP 4 - Find common reference from kmerfinder results
+ * STEP 4 - If not provided, download reference from kmerfinder results
  */
-if (params.used_external_reference == false ){
-    process FIND_COMMON_REFERENCE{
-        tag "Find common Reference"
+if (!params.reference_fasta && !params.reference_gff) {
+    
+    process FIND_DOWNLOAD_COMMON_REFERENCE {
+
         label 'process_low'
         publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
 
         input:
-        path ('kmerfinder_results/') from ch_kmerfinder_results.collect().ifEmpty([])
-        // file reference_bacteria_file from ch_reference_ncbi_bacteria
+        path(kmerfinder_results) from ch_kmerfinder_results.collect()
+        file(reference_bacteria_file) from ch_reference_ncbi_bacteria
 
-        nucleotide_end='_genomic.fna.gz'
-        protein_end='_protein.faa.gz'
-        gff_end='_genomic.gff.gz'
         output:
-        file 'references_found.tsv'
-        file 'bacteria_id' into ch_findcomon_download
+        tuple path("*_genomic.fna.gz"), path("*_genomic.gff.gz") into quast_references
+        path("references_found.tsv")
 
         script:
         """
-        find_common_reference.py -d kmerfinder_results -o references_found.tsv
-        bacteria_id=\$(head -n1 references_found.tsv | cut -f1 -d\$'\t')
-        echo \$bacteria_id > 'bacteria_id'
-        """
+        mkdir kmerfinder_resultsdir
+        mv $kmerfinder_results kmerfinder_resultsdir
 
+        find_common_reference.py -d kmerfinder_resultsdir -o references_found.tsv
+        download_reference.py -file references_found.tsv -reference $reference_bacteria_file -out_dir .
+        """
     }
 }
 
-process REFERENCE_DOWNLOAD{
-    tag "Reference Dowload"
-    label 'process_low'
-    publishDir "${params.outdir}/reference_download", mode: params.publish_dir_mode
-
-    input:
-    file bacteria_file_id from ch_findcomon_download
-
-    file reference_bacteria_file from ch_reference_ncbi_bacteria
-
-
-    nucleotide_end='_genomic.fna.gz'
-    protein_end='_protein.faa.gz'
-    gff_end='_genomic.gff.gz'
-    output:
-    file 'REFERENCES/*_genomic.fna' into ch_reference_fna
-    file 'REFERENCES/*_protein.faa' into ch_reference_protein
-    file 'REFERENCES/*_genomic.gff' into ch_reference_gff
-    // file 'references_found.tsv'
-
-
-    script:
-    """
-    bacteriaID=\$(cat ${bacteria_file_id})
-    ftp_path=\$(grep "\$bacteriaID" $reference_bacteria_file | cut -f20)
-    echo \$ftp_path > path_ftp
-    download_reference.py -url \$ftp_path -out_dir REFERENCES
-    gunzip REFERENCES/*.gz
-    """
-}
 /*
- * STEP 4 - Download reference L
+ * STEP 5 - Assembly of reads and check with the -chosen or downloaded- reference
  */
-/*
+
 process UNICYCLER {
-	tag "$prefix"
+	tag "${samplename}"
     label 'process_low'
-	publishDir path: { "${params.outdir}/unicycler" }, mode: 'copy'
+	publishDir path: { "${params.outdir}/unicycler" }, mode: params.publish_dir_mode
 
 	input:
-	//set file(readsR1),file(readsR2) from ch_fastp_unicycler
-    tuple val(sample), val(single_end), path(reads) from ch_fastp_unicycler
+    tuple val(samplename), val(single_end), path(reads) from ch_fastp_unicycler
+
 	output:
-	file "${prefix}_assembly.fasta" into ch_unicycler_quast, ch_unicycler_prokka
-
+	path(assembly_result) into ch_unicycler_quast
+    tuple val(samplename), val(single_end), path("${samplename}/${samplename}.fasta") into ch_unicycler_prokka
+    
 	script:
-	//prefix = readsR1.toString() - ~/(.R1)?(_1)?(_R1)?(_trimmed)?(_paired)?(_val_1)?(\.fq)?(\.fastq)?(\.gz)?$/
-	"""
-	unicycler --threads ${task.cpus} -1 ${sample}_1.trim.fastq.gz -2${sample}_2.trim.fastq.gz  -o .
+    in_reads = single_end ? "-l ${reads}" : "-1 ${reads[0]} -2 ${reads[1]}"
+    assembly_result = "${samplename}/${samplename}.fasta"
 
+	"""
+	unicycler \\
+    --threads $task.cpus\\
+    $in_reads \\
+    --out $samplename
+
+    mv ${samplename}/assembly.fasta $assembly_result
 	"""
 }
-*/
+
+process QUAST {
+    tag "${reference_fasta}"
+    label 'process_medium'
+	publishDir path: {"${params.outdir}/quast"}, mode: params.publish_dir_mode,
+						saveAs: { filename -> if(filename == "quast_results") "${prefix}_quast_results"}
+
+	input:
+
+	path(assembly_result) from ch_unicycler_quast.collect()
+    tuple path(reference_fasta), path(reference_gff) from quast_references
+
+	output:
+	path("quast_results/latest/report.tsv") into quast_multiqc
+    path("quast_results")
+    
+	script:
+	
+    """
+	quast.py \\
+    -R $reference_fasta \\
+    -G $reference_gff \\
+    --threads ${task.cpus} \\
+    $assembly_result
+	"""
+}
+
+process PROKKA {
+    tag "${samplename}"
+    label 'process_medium'
+
+	publishDir path: {"${params.outdir}/prokka"}, mode: params.publish_dir_mode,
+						saveAs: { filename -> if(filename == "prokka_results") "${prefix}_prokka"}
+
+	input:
+	tuple val(samplename), val(single_end), path(scaffold) from ch_unicycler_prokka
+
+	output:
+	path("prokka_results") into prokka_results
+
+	script:
+
+	"""
+	prokka \\
+    --force \\
+    --outdir prokka_results \\
+    --prefix $samplename \\
+    --addgenes \\
+    --kingdom Bacteria \\
+    --usegenus \\
+    --gram $params.gram \\
+    --locustag $samplename \\
+    --centre CNM \\
+    --compliant \\
+    ${scaffold}
+	"""
+}
 
 /*
- * STEP 3 - Output Description HTML
+ * STEP 6 - Output Description HTML
  */
-process output_documentation {
+process OUTPUT_DOCUMENTATION {
     publishDir "${params.outdir}/pipeline_info", mode: params.publish_dir_mode
 
     input:
-    file output_docs from ch_output_docs
-    file images from ch_output_docs_images
+    path(output_docs) from ch_output_docs
+    path(images) from ch_output_docs_images
+    // prueba para comprobar si hay diferencia entre pedirle file a un path o viceversa, en principio dará error
 
     output:
     file 'results_description.html'
@@ -717,38 +776,28 @@ process output_documentation {
     """
 }
 
-
 /*
- * STEP 2 - MultiQC
+ * MultiQC
  */
 
-process multiqc {
+process MULTIQC {
     publishDir "${params.outdir}/MultiQC", mode: params.publish_dir_mode
 
     input:
-    file (multiqc_config) from ch_multiqc_config
-    file (mqc_custom_config) from ch_multiqc_custom_config.collect().ifEmpty([])
-    // TODO nf-core: Add in log files from your new processes for MultiQC to find!
-    file ('fastqc/*') from ch_fastqc_results.collect().ifEmpty([])
-    file ('software_versions/*') from ch_software_versions_yaml.collect()
-    file workflow_summary from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
+    path(multiqc_config) from ch_multiqc_config
+    path(mqc_custom_config) from ch_multiqc_custom_config.collect().ifEmpty([])   
+    path('fastqc/*') from ch_fastqc_results.collect().ifEmpty([])
+    path('software_versions/*') from ch_software_versions_yaml.collect()
+    path(workflow_summary) from ch_workflow_summary.collectFile(name: "workflow_summary_mqc.yaml")
 
     output:
-    file "*multiqc_report.html" into ch_multiqc_report
-    file "*_data"
-    file "multiqc_plots"
+    path("*multiqc_report.html") into ch_multiqc_report
+    path("*_data")
+    path("multiqc_plots")
 
     script:
-    rtitle = ''
-    rfilename = ''
-    if (!(workflow.runName ==~ /[a-z]+_[a-z]+/)) {
-        rtitle = "--title \"${workflow.runName}\""
-        rfilename = "--filename " + workflow.runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report"
-    }
-    custom_config_file = params.multiqc_config ? "--config $mqc_custom_config" : ''
-    // TODO nf-core: Specify which MultiQC modules to use with -m for a faster run time
     """
-    multiqc -f $rtitle $rfilename $custom_config_file .
+    multiqc .
     """
 }
 /*

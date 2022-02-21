@@ -1,6 +1,6 @@
 # You can use this file to create a conda environment for this pipeline:
 #   conda env create -f environment.yml
-name: nf-assembacterias-0.0.1
+name: nf-core-assemblybacterias-1.0dev
 channels:
   - conda-forge
   - bioconda
@@ -9,24 +9,17 @@ dependencies:
   - conda-forge::python=3.7.3
   - conda-forge::markdown=3.1.1
   - conda-forge::pymdown-extensions=6.0
-  - conda-forge::pygments=2.9.0
+  - conda-forge::pygments=2.5.2
   - conda-forge::python-wget=3.2
+
   # TODO nf-core: Add required software dependencies here
+
   - bioconda::fastqc=0.11.8
-  - bioconda::multiqc=1.10.1
-  - bioconda::fastp=0.20.1
   - bioconda::quast=5.0.2
   - bioconda::unicycler=0.4.8
-  - bioconda::quast=5.0.2
+  - bioconda::fastp=0.23.2
+  - bioconda::multiqc=1.6
   - bioconda::prokka=1.14.6
   - bioconda::pilon=1.24
-  #  SPAdes cannot be a version later than v3.13.0.
-  # This is because after that version, SPAdes stopped saving intermediate files that Unicycler needs.
   - bioconda::spades=3.13.0
-  #- pip
-  #- pip:
-source:
-   url: https://bitbucket.org/genomicepidemiology/kmerfinder.git
-
-prefix: /home/bioinfo/anaconda3/envs/assembacterias_nextflow
-#conda env create --prefix /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/work/conda/nf-core-assemblybacterias-dbadda8e82f9cf8866b8b6473e78057d --file /media/bioinfo/Massive_data/practicas-CarlosIII/servicios/nexflow_assembly/nf-core-assemblybacterias/environment.yml
+  
