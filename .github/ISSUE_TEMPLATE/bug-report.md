@@ -1,38 +1,51 @@
----
 name: Bug report
-about: Create a report to help us improve
-title: ''
-labels: ''
-assignees: luissian
+description: Report something that is broken or incorrect
+labels: bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you post this issue, please check the documentation:
 
----
+        - [website: troubleshooting](https://)
+        - [ocumentation](https://)
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description of the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+  - type: textarea
+    id: command_used
+    attributes:
+      label: Command used and terminal output
+      description: Steps to reproduce the behaviour. Please paste the command you used to launch the pipeline and the output from your terminal.
+      render: console
+      placeholder: |
+        $ nextflow run ...
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+        Some output where something broke
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+  - type: textarea
+    id: files
+    attributes:
+      label: Relevant files
+      description: |
+        Please drag and drop the relevant files here. Create a `.zip` archive if the extension is not allowed.
+        Your verbose log file `.nextflow.log` is often useful _(this is a hidden file in the directory where you launched the pipeline)_ as well as custom Nextflow configuration files.
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+  - type: textarea
+    id: system
+    attributes:
+      label: System information
+      description: |
+        * Nextflow version _(eg. 21.10.3)_
+        * Hardware _(eg. HPC, Desktop, Cloud)_
+        * Executor _(eg. slurm, local, awsbatch)_
+        * Container engine: _(e.g. Docker, Singularity, Conda, Podman, Shifter or Charliecloud)_
+        * OS _(eg. CentOS Linux, macOS, Linux Mint)_
+        * Version of nf-core/smrnaseq _(eg. 1.1, 1.5, 1.8.2)_
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
-
-**Additional context**
-Add any other context about the problem here.
