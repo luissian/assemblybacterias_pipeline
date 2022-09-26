@@ -19,8 +19,7 @@ if (params.input) { ch_input = file(params.input) } else { exit 1, 'Input sample
 //if (!params.kmerbacteriadb) {
 //    if (params.kmerbacteriadb) {ch_kmerbacteriadb = file(params.kmerbacteriadb) } else { exit 1, 'Required kmerfinder database not specified'}
 
-
-
+if (params.kmer_bacteria_db) { ch_kmerfinder_db = file(params.kmer_bacteria_db, checkIfExists: true) } else { exit 1, "Kmerfinder database file does not exist" }
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -42,6 +41,7 @@ ch_multiqc_custom_config = params.multiqc_config ? Channel.fromPath(params.multi
 //
 include { INPUT_CHECK } from '../subworkflows/local/input_check'
 include { FASTQC_TRIMGALORE  } from '../subworkflows/nf-core/fastqc_trimgalore'
+include { KMERFINDER_CONTAMINATION } from '../subworkflows/local/kmerfinder_contamination'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,9 +116,17 @@ workflow ASSEMBLYBACTERIAS {
     )
 
     ch_versions = ch_versions.mix(FASTQC_TRIMGALORE.out.versions)
+    reads_for_kmerfinder = FASTQC_TRIMGALORE.out.reads
+    //
+    // SUBWORKFLOW: Find specie best match
+    //
 
+    KMERFINDER_CONTAMINATION (
+      reads_for_kmerfinder,
+      ch_kmerfinder_db
+    )
 
-
+    ch_versions = ch_versions.mix(KMERFINDER_CONTAMINATION.out.versions)
 
     CUSTOM_DUMPSOFTWAREVERSIONS (
         ch_versions.unique().collectFile(name: 'collated_versions.yml')
