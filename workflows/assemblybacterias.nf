@@ -41,7 +41,7 @@ ch_multiqc_custom_config = params.multiqc_config ? Channel.fromPath(params.multi
 //
 include { INPUT_CHECK } from '../subworkflows/local/input_check'
 include { FASTQC_TRIMGALORE  } from '../subworkflows/nf-core/fastqc_trimgalore'
-include { KMERFINDER_CONTAMINATION } from '../subworkflows/local/kmerfinder_contamination'
+include { KMERFINDER_HITS } from '../subworkflows/local/kmerfinder_hits'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -121,12 +121,12 @@ workflow ASSEMBLYBACTERIAS {
     // SUBWORKFLOW: Find specie best match
     //
 
-    KMERFINDER_CONTAMINATION (
+    KMERFINDER_HITS (
       reads_for_kmerfinder,
       ch_kmerfinder_db
     )
 
-    ch_versions = ch_versions.mix(KMERFINDER_CONTAMINATION.out.versions)
+    ch_versions = ch_versions.mix(KMERFINDER_HITS.out.versions)
 
     CUSTOM_DUMPSOFTWAREVERSIONS (
         ch_versions.unique().collectFile(name: 'collated_versions.yml')

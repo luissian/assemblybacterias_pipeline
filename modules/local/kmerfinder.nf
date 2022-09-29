@@ -1,4 +1,4 @@
-process KMERFINDER_RUN {
+process KMERFINDER {
     tag "$meta.id"
     label 'process_medium'
 
@@ -12,12 +12,12 @@ process KMERFINDER_RUN {
 
 
     output:
-    path "kmerfinder/*"  , emit: kmerfinder_dir
+    path "${samplename}*"  , emit: kmer_result
     path "versions.yml", emit: versions
 
-script:
-    single_end = false
-    samplename_dir = "${reads}"
+    script:
+    // single_end = false
+    samplename = "${meta.id}"
     // in_reads = single_end ? "${reads}" : "${reads[0]} ${reads[1]}"
     kmerfinderDB = params.kmer_bacteria_db
 
@@ -25,15 +25,18 @@ script:
     """
     kmerfinder.py \\
     --infile $reads \\
-    --output_folder kmerfinder \\
+    --output_folder ./ \\
     --db_path $kmerfinderDB/bacteria.ATG \\
     -tax  $kmerfinderDB/bacteria.name \\
     -x
 
+    mv results.txt ${samplename}_results.txt
+    mv results.spa ${samplename}_results.spa
+    mv data.json ${samplename}_data.json
 
     cat <<-END_VERSIONS > versions.yml
-    ${task.process}":
-        kmerfincer: \$(echo \$(kmerfinder -v 2>&1))
+    ${task.process}:
+        kmerfinder: 3.0.2
     END_VERSIONS
     """
 }
